@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="投資組合">
+<meta name="theme-color" content="#0a0e27">
+<title>投資組合管理</title>
+
+<!-- iOS 加入主畫面圖示（可選） -->
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230a0e27'/%3E%3Ctext x='50' y='65' font-size='50' text-anchor='middle' fill='%2364ffda'%3E📊%3C/text%3E%3C/svg%3E">
+
+<style>
+/* ==========================================================
+   🎨 全域變數 - 設計系統
+   ========================================================== */
+:root {
+    /* 主色系 - 深邃科技藍 */
+    --bg-primary: #0a0e27;
+    --bg-secondary: #131837;
+    --bg-tertiary: #1a1f3a;
+    --bg-card: rgba(26, 31, 58, 0.6);
+    --bg-glass: rgba(255, 255, 255, 0.05);
+    
+    /* 強調色 */
+    --accent-primary: #64ffda;     /* 青綠色 - 主要動作 */
+    --accent-secondary: #7c4dff;   /* 紫色 - 次要 */
+    --accent-warning: #ffd54f;     /* 黃色 - 警示 */
+    
+    /* 漲跌色 */
+    --color-up: #ff5252;           /* 台股紅漲 */
+    --color-down: #00e676;         /* 台股綠跌 */
+    --color-flat: #90a4ae;
+    
+    /* 文字色 */
+    --text-primary: #e8eaf6;
+    --text-secondary: #9ea2c0;
+    --text-tertiary: #6c7293;
+    --text-disabled: #4a5072;
+    
+    /* 邊框與陰影 */
+    --border-color: rgba(255, 255, 255, 0.08);
+    --border-hover: rgba(100, 255, 218, 0.3);
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
+    --shadow-glow: 0 0 24px rgba(100, 255, 218, 0.2);
+    
+    /* 圓角 */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 24px;
+    
+    /* 過渡動畫 */
+    --transition-fast: 0.15s ease;
+    --transition-base: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ==========================================================
+   🔧 重置與基礎
+   ========================================================== */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html {
+    font-size: 16px;
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 
+                 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+    line-height: 1.6;
+    
+    /* 背景漸層光暈 */
+    background-image: 
+        radial-gradient(circle at 15% 20%, rgba(124, 77, 255, 0.15) 0%, transparent 40%),
+        radial-gradient(circle at 85% 80%, rgba(100, 255, 218, 0.1) 0%, transparent 40%),
+        radial-gradient(circle at 50% 50%, rgba(26, 31, 58, 0.5) 0%, transparent 70%);
+    background-attachment: fixed;
+}
+
+/* iOS 安全區域 */
+@supports (padding: max(0px)) {
+    body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+}
+
+/* ==========================================================
+   📱 載入動畫
+   ========================================================== */
+.loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    transition: opacity 0.4s, visibility 0.4s;
+}
+
+.loading-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.loading-spinner {
+    width: 60px;
+    height: 60px;
+    border: 3px solid var(--border-color);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ==========================================================
+   🎯 設定頁面（首次使用）
+   ========================================================== */
+.setup-screen {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-primary);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.setup-screen.active {
+    display: flex;
+}
+
+.setup-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    padding: 40px;
+    max-width: 500px;
+    width: 100%;
+    box-shadow: var(--shadow-lg);
+}
+
+.setup-card h2 {
+    font-size: 1.5rem;
+    margin-bottom: 8px;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.setup-card p {
+    color: var(--text-secondary);
+    margin-bottom: 24px;
+    font-size: 0.9rem;
+}
+
+.setup-card .form-group {
+    margin-bottom: 20px;
+}
+
+.setup-card label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.setup-card input {
+    width: 100%;
+    padding: 12px 16px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    transition: var(--transition-base);
+    font-family: 'SF Mono', Monaco, monospace;
+}
+
+.setup-card input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(100, 255, 218, 0.1);
+}
+
+.setup-btn {
+    width: 100%;
+    padding: 14px;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--bg-primary);
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition-base);
+    margin-top: 8px;
+}
+
+.setup-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-glow);
+}
+
+.setup-btn:active {
+    transform: translateY(0);
+}
+
+.setup-help {
+    margin-top: 20px;
+    padding: 16px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+    line-height: 1.7;
+}
+
+/* ==========================================================
+   🏗️ 主體佈局
+   ========================================================== */
+.app-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+    min-height: 100vh;
+    display: none;
+}
+
+.app-container.active {
+    display: block;
+}
+
+/* ==========================================================
+   🎩 頂部標題區
+   ========================================================== */
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    padding: 20px 24px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+}
+
+.app-title {
+    font-size: 1.5rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.sync-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    padding: 8px 14px;
+    background: var(--bg-tertiary);
+    border-radius: 20px;
+    border: 1px solid var(--border-color);
+}
+
+.sync-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--color-flat);
+    transition: var(--transition-base);
+}
+
+.sync-dot.synced { background: var(--accent-primary); box-shadow: 0 0 8px var(--accent-primary); }
+.sync-dot.syncing { background: var(--accent-warning); animation: pulse 1.5s infinite; }
+.sync-dot.error { background: var(--color-up); }
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* ==========================================================
+   📊 總覽卡片
+   ========================================================== */
+.overview-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.overview-card {
+    background: var(--bg-card);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    transition: var(--transition-base);
+    position: relative;
+    overflow: hidden;
+}
+
+.overview-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    opacity: 0;
+    transition: var(--transition-base);
+}
+
+.overview-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--border-hover);
+    box-shadow: var(--shadow-md);
+}
+
+.overview-card:hover::before {
+    opacity: 1;
+}
+
+.overview-label {
+    font-size: 0.8rem;
+    color: var(--text-tertiary);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.overview-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+    font-family: 'SF Mono', Monaco, monospace;
+}
+
+.overview-change {
+    font-size: 0.85rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.overview-change.up { color: var(--color-up); }
+.overview-change.down { color: var(--color-down); }
+.overview-change.flat { color: var(--color-flat); }
+
+/* ==========================================================
+   🎚️ 分頁標籤
+   ========================================================== */
+.tab-nav {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 20px;
+    padding: 6px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.tab-nav::-webkit-scrollbar { display: none; }
+
+.tab-btn {
+    flex: 1;
+    min-width: 100px;
+    padding: 10px 16px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition-base);
+    white-space: nowrap;
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-glass);
+}
+
+.tab-btn.active {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    color: var(--bg-primary);
+    font-weight: 600;
+    box-shadow: var(--shadow-sm);
+}
+
+/* ==========================================================
+   📑 分頁內容
+   ========================================================== */
+.tab-content {
+    display: none;
+    animation: fadeIn 0.3s ease;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.section-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+/* ==========================================================
+   🔘 按鈕
+   ========================================================== */
+.btn {
+    padding: 10px 18px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition-base);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: inherit;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    color: var(--bg-primary);
+    font-weight: 600;
+}
+
+.btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-glow);
+}
+
+.btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.btn-danger {
+    background: rgba(255, 82, 82, 0.1);
+    color: var(--color-up);
+    border: 1px solid rgba(255, 82, 82, 0.3);
+}
+
+.btn-danger:hover {
+    background: rgba(255, 82, 82, 0.2);
+}
+
+.btn-icon {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    justify-content: center;
+}
+
+/* ==========================================================
+   📋 表格
+   ========================================================== */
+.table-container {
+    background: var(--bg-card);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    overflow-x: auto;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+    min-width: 700px;
+}
+
+.data-table thead {
+    background: var(--bg-tertiary);
+}
+
+.data-table th {
+    padding: 14px 16px;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.data-table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-family: 'SF Mono', Monaco, monospace;
+    white-space: nowrap;
+}
+
+.data-table tbody tr {
+    transition: var(--transition-fast);
+}
+
+.data-table tbody tr:hover {
+    background: var(--bg-glass);
+}
+
+.data-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.text-up { color: var(--color-up); }
+.text-down { color: var(--color-down); }
+.text-flat { color: var(--color-flat); }
+
+/* ==========================================================
+   📭 空狀態
+   ========================================================== */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-tertiary);
+}
+
+.empty-state-icon {
+    font-size: 3rem;
+    margin-bottom: 16px;
+    opacity: 0.5;
+}
+
+.empty-state-text {
+    font-size: 0.95rem;
+    margin-bottom: 20px;
+}
+
+/* ==========================================================
+   🎭 Modal 彈窗
+   ========================================================== */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 20px;
+    animation: fadeIn 0.2s ease;
+}
+
+.modal-overlay.active {
+    display: flex;
+}
+
+.modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    padding: 28px;
+    max-width: 480px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    animation: slideUp 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.modal-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.modal-close {
+    background: var(--bg-tertiary);
+    border: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1.2rem;
+    transition: var(--transition-base);
+}
+
+.modal-close:hover {
+    background: var(--color-up);
+    color: white;
+}
+
+.form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+    font-weight: 500;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    transition: var(--transition-base);
+    font-family: inherit;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px rgba(100, 255, 218, 0.1);
+}
+
+.modal-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 24px;
+}
+
+.modal-actions .btn {
+    flex: 1;
+    justify-content: center;
+}
+
+/* ==========================================================
+   🍞 Toast 通知
+   ========================================================== */
+.toast-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.toast {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 14px 20px;
+    box-shadow: var(--shadow-md);
+    min-width: 240px;
+    max-width: 360px;
+    animation: slideInRight 0.3s ease;
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+@keyframes slideInRight {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+.toast.success { border-left: 3px solid var(--accent-primary); }
+.toast.error { border-left: 3px solid var(--color-up); }
+.toast.info { border-left: 3px solid var(--accent-secondary); }
+
+.toast-icon {
+    font-size: 1.2rem;
+}
+
+.toast-message {
+    flex: 1;
+    font-size: 0.9rem;
+}
+
+/* ==========================================================
+   📱 響應式（手機）
+   ========================================================== */
+@media (max-width: 768px) {
+    .app-container { padding: 12px; }
+    
+    .app-header {
+        padding: 14px 16px;
+        margin-bottom: 16px;
+    }
+    
+    .app-title { font-size: 1.2rem; }
+    .sync-status { font-size: 0.7rem; padding: 6px 10px; }
+    
+    .overview-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+    
+    .overview-card { padding: 14px; }
+    .overview-value { font-size: 1.3rem; }
+    .overview-label { font-size: 0.7rem; }
+    
+    .tab-btn {
+        min-width: 80px;
+        padding: 8px 12px;
+        font-size: 0.85rem;
+    }
+    
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    
+    .modal {
+        padding: 20px;
+        border-radius: var(--radius-lg);
+    }
+    
+    .toast-container {
+        top: 10px;
+        right: 10px;
+        left: 10px;
+    }
+    
+    .toast { min-width: auto; }
+}
+
+/* ==========================================================
+   ✨ 額外動畫
+   ========================================================== */
+.fade-in {
+    animation: fadeIn 0.4s ease;
+}
+
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+/* 自訂滾動條 */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-primary);
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     🔄 載入動畫
+     ============================================================ -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+</div>
+
+<!-- ============================================================
+     🎯 設定頁面（首次使用）
+     ============================================================ -->
+<div class="setup-screen" id="setupScreen">
+    <div class="setup-card">
+        <h2>🚀 歡迎使用投資組合管理</h2>
+        <p>首次使用需要設定 GitHub Token 和 Gist ID，讓你的資料能在電腦和手機間同步。</p>
+        
+        <div class="form-group">
+            <label for="setupToken">GitHub Token</label>
+            <input type="password" id="setupToken" placeholder="github_pat_xxxxxxxxxxxx">
+        </div>
+        
+        <div class="form-group">
+            <label for="setupGistId">Gist ID</label>
+            <input type="text" id="setupGistId" placeholder="例如：3f8a2b1c9d4e5f6a7b8c9d0e">
+        </div>
+        
+        <button class="setup-btn" id="setupSaveBtn">儲存並開始使用</button>
+        
+        <div class="setup-help">
+            💡 這兩個資訊只會儲存在你自己的瀏覽器，不會傳送到任何第三方伺服器。<br>
+            🔐 Token 已加密儲存於 localStorage。
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     🏠 主應用程式
+     ============================================================ -->
+<div class="app-container" id="appContainer">
+    
+    <!-- 標題列 -->
+    <header class="app-header">
+        <div class="app-title">
+            📊 投資組合管理
+        </div>
+        <div class="sync-status" id="syncStatus">
+            <span class="sync-dot" id="syncDot"></span>
+            <span id="syncText">未同步</span>
+        </div>
+    </header>
+    
+    <!-- 總覽卡片 -->
+    <section class="overview-grid">
+        <div class="overview-card">
+            <div class="overview-label">總資產</div>
+            <div class="overview-value" id="totalAssets">$0</div>
+            <div class="overview-change flat">—</div>
+        </div>
+        <div class="overview-card">
+            <div class="overview-label">總損益</div>
+            <div class="overview-value" id="totalPnl">$0</div>
+            <div class="overview-change flat" id="totalPnlPct">0.00%</div>
+        </div>
+        <div class="overview-card">
+            <div class="overview-label">持股檔數</div>
+            <div class="overview-value" id="stockCount">0</div>
+            <div class="overview-change flat">檔</div>
+        </div>
+        <div class="overview-card">
+            <div class="overview-label">期貨部位</div>
+            <div class="overview-value" id="futuresCount">0</div>
+            <div class="overview-change flat">口</div>
+        </div>
+    </section>
+    
+    <!-- 分頁導航 -->
+    <nav class="tab-nav">
+        <button class="tab-btn active" data-tab="stocks">📈 持股</button>
+        <button class="tab-btn" data-tab="futures">📉 期貨</button>
+        <button class="tab-btn" data-tab="watchlist">👁️ 觀察清單</button>
+        <button class="tab-btn" data-tab="settings">⚙️ 設定</button>
+    </nav>
+    
+    <!-- 持股分頁 -->
+    <section class="tab-content active" id="tab-stocks">
+        <div class="section-header">
+            <h2 class="section-title">我的持股</h2>
+            <button class="btn btn-primary" id="addStockBtn">＋ 新增持股</button>
+        </div>
+        <div id="stocksContainer"></div>
+    </section>
+    
+    <!-- 期貨分頁 -->
+    <section class="tab-content" id="tab-futures">
+        <div class="section-header">
+            <h2 class="section-title">期貨部位</h2>
+            <button class="btn btn-primary" id="addFuturesBtn">＋ 新增部位</button>
+        </div>
+        <div id="futuresContainer"></div>
+    </section>
+    
+    <!-- 觀察清單分頁 -->
+    <section class="tab-content" id="tab-watchlist">
+        <div class="section-header">
+            <h2 class="section-title">觀察清單</h2>
+            <button class="btn btn-primary" id="addWatchBtn">＋ 新增標的</button>
+        </div>
+        <div id="watchlistContainer"></div>
+    </section>
+    
+    <!-- 設定分頁 -->
+    <section class="tab-content" id="tab-settings">
+        <div class="section-header">
+            <h2 class="section-title">設定</h2>
+        </div>
+        <div class="table-container" style="padding: 24px;">
+            <div class="form-group">
+                <label>GitHub Token（已設定）</label>
+                <input type="password" id="settingsToken" readonly>
+            </div>
+            <div class="form-group">
+                <label>Gist ID</label>
+                <input type="text" id="settingsGistId" readonly>
+            </div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px;">
+                <button class="btn btn-secondary" id="manualSyncBtn">🔄 手動同步</button>
+                <button class="btn btn-secondary" id="exportBtn">📥 匯出資料</button>
+                <button class="btn btn-secondary" id="importBtn">📤 匯入資料</button>
+                <button class="btn btn-danger" id="resetBtn">🗑️ 重設設定</button>
+            </div>
+            <div style="margin-top: 24px; padding: 16px; background: var(--bg-tertiary); border-radius: var(--radius-sm); font-size: 0.85rem; color: var(--text-tertiary);">
+                <div>📦 版本：v1.0.0</div>
+                <div>🔄 最後同步：<span id="lastSyncTime">—</span></div>
+                <div>📊 資料筆數：<span id="dataCount">0</span></div>
+            </div>
+        </div>
+    </section>
+    
+</div>
+
+<!-- ============================================================
+     🎭 Modal 容器（動態生成）
+     ============================================================ -->
+<div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modalContent"></div>
+</div>
+
+<!-- ============================================================
+     🍞 Toast 容器
+     ============================================================ -->
+<div class="toast-container" id="toastContainer"></div>
+
+<!-- ============================================================
+     📜 JavaScript（將在第 3、4 則訊息中提供）
+     ============================================================ -->
+<script>
+/* 預留 - 等待第 3、4 則 JavaScript */
+// 暫時先讓畫面顯示，避免一片空白
+document.getElementById('loadingOverlay').classList.add('hidden');
+
+// 檢查是否已設定
+const hasSetup = localStorage.getItem('portfolio_token') && localStorage.getItem('portfolio_gist_id');
+if (hasSetup) {
+    document.getElementById('appContainer').classList.add('active');
+} else {
+    document.getElementById('setupScreen').classList.add('active');
+}
+</script>
+
+</body>
+</html>

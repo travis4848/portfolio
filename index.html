@@ -994,17 +994,1900 @@ body {
      📜 JavaScript（將在第 3、4 則訊息中提供）
      ============================================================ -->
 <script>
-/* 預留 - 等待第 3、4 則 JavaScript */
-// 暫時先讓畫面顯示，避免一片空白
-document.getElementById('loadingOverlay').classList.add('hidden');
+/* ============================================================
+   📦 投資組合管理系統 - JavaScript Part 1
+   模組：CONFIG / Utils / Storage / GistAPI / DataModel / State
+   ============================================================ */
 
-// 檢查是否已設定
-const hasSetup = localStorage.getItem('portfolio_token') && localStorage.getItem('portfolio_gist_id');
-if (hasSetup) {
-    document.getElementById('appContainer').classList.add('active');
+'use strict';
+
+/* ============================================================
+   🔧 模組 1：CONFIG - 全域設定
+   ============================================================ */
+const CONFIG = {
+    // 應用程式版本
+    VERSION: '1.0.0',
+    
+    // localStorage 鍵名
+    STORAGE_KEYS: {
+        TOKEN: 'portfolio_token',
+        GIST_ID: 'portfolio_gist_id',
+        DATA_CACHE: 'portfolio_data_cache',
+        LAST_SYNC: 'portfolio_last_sync',
+        SETTINGS: 'portfolio_settings'
+    },
+    
+    // GitHub API
+    GITHUB_API: 'https://api.github.com',
+    GIST_FILENAME: 'portfolio.json',
+    
+    // 同步設定
+    SYNC: {
+        AUTO_SYNC_INTERVAL: 1 * 60 * 1000,    // 自動同步間隔：1 分鐘
+        DEBOUNCE_DELAY: 2000,                  // 編輯後延遲同步：2 秒
+        MAX_RETRY: 3,                          // 失敗重試次數
+        TIMEOUT: 15000                         // API 請求逾時：15 秒
+    },
+    
+    // 資料版本（資料結構升級時用）
+    DATA_VERSION: '1.0',
+    
+    // 預設資料模板
+    DEFAULT_DATA: {
+        version: '1.0',
+        lastUpdated: null,
+        stocks: [],
+        futures: [],
+        watchlist: [],
+        settings: {
+            currency: 'TWD',
+            theme: 'dark',
+            autoSync: true
+        }
+    },
+    
+    // Toast 顯示時間
+    TOAST_DURATION: 3000
+};
+
+/* ============================================================
+   🛠️ 模組 2：Utils - 通用工具函式
+   ============================================================ */
+const Utils = {
+    /**
+     * 產生唯一 ID（用於每筆資料的識別）
+     */
+    generateId() {
+        return 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    },
+    
+    /**
+     * 格式化金額（千分位 + 兩位小數）
+     */
+    formatMoney(num, decimals = 0) {
+        if (num === null || num === undefined || isNaN(num)) return '$0';
+        const sign = num < 0 ? '-' : '';
+        const absNum = Math.abs(num);
+        return sign + '$' + absNum.toLocaleString('en-US', {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals
+        });
+    },
+    
+    /**
+     * 格式化百分比
+     */
+    formatPercent(num, decimals = 2) {
+        if (num === null || num === undefined || isNaN(num)) return '0.00%';
+        const sign = num > 0 ? '+' : '';
+        return sign + num.toFixed(decimals) + '%';
+    },
+    
+    /**
+     * 格式化數字（千分位）
+     */
+    formatNumber(num, decimals = 2) {
+        if (num === null || num === undefined || isNaN(num)) return '0';
+        return num.toLocaleString('en-US', {
+            minimumFractionDigits: decimals,
+            maximumFractionDigits: decimals
+        });
+    },
+    
+    /**
+     * 格式化時間（例：2026-05-13 17:48）
+     */
+    formatDateTime(isoString) {
+        if (!isoString) return '—';
+        try {
+            const d = new Date(isoString);
+            const pad = n => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+                   `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        } catch {
+            return '—';
+        }
+    },
+    
+    /**
+     * 格式化相對時間（例：3 分鐘前）
+     */
+    formatRelativeTime(isoString) {
+        if (!isoString) return '從未同步';
+        const diff = Date.now() - new Date(isoString).getTime();
+        const sec = Math.floor(diff / 1000);
+        const min = Math.floor(sec / 60);
+        const hour = Math.floor(min / 60);
+        const day = Math.floor(hour / 24);
+        
+        if (sec < 10) return '剛剛';
+        if (sec < 60) return `${sec} 秒前`;
+        if (min < 60) return `${min} 分鐘前`;
+        if (hour < 24) return `${hour} 小時前`;
+        if (day < 30) return `${day} 天前`;
+        return Utils.formatDateTime(isoString);
+    },
+    
+    /**
+     * 簡易加密（XOR + Base64）— 不是高強度加密，但比明碼好
+     * 用於 Token 在 localStorage 的偽裝儲存
+     */
+    encrypt(text) {
+        if (!text) return '';
+        const key = 'portfolio_2026_secret_key';
+        let result = '';
+        for (let i = 0; i < text.length; i++) {
+            result += String.fromCharCode(
+                text.charCodeAt(i) ^ key.charCodeAt(i % key.length)
+            );
+        }
+        return btoa(unescape(encodeURIComponent(result)));
+    },
+    
+    decrypt(encoded) {
+        if (!encoded) return '';
+        try {
+            const text = decodeURIComponent(escape(atob(encoded)));
+            const key = 'portfolio_2026_secret_key';
+            let result = '';
+            for (let i = 0; i < text.length; i++) {
+                result += String.fromCharCode(
+                    text.charCodeAt(i) ^ key.charCodeAt(i % key.length)
+                );
+            }
+            return result;
+        } catch {
+            return '';
+        }
+    },
+    
+    /**
+     * 防抖函式 - 連續觸發只執行最後一次
+     */
+    debounce(fn, delay) {
+        let timer = null;
+        return function(...args) {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => fn.apply(this, args), delay);
+        };
+    },
+    
+    /**
+     * 深拷貝物件
+     */
+    deepClone(obj) {
+        return JSON.parse(JSON.stringify(obj));
+    },
+    
+    /**
+     * Sleep 函式（用於重試延遲）
+     */
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    },
+    
+    /**
+     * 安全解析 JSON
+     */
+    safeParseJSON(str, fallback = null) {
+        try {
+            return JSON.parse(str);
+        } catch {
+            return fallback;
+        }
+    },
+    
+    /**
+     * 驗證 GitHub Token 格式
+     */
+    isValidToken(token) {
+        if (!token) return false;
+        // Fine-grained: github_pat_xxx，Classic: ghp_xxx
+        return /^(github_pat_|ghp_|gho_)[A-Za-z0-9_]{20,}$/.test(token);
+    },
+    
+    /**
+     * 驗證 Gist ID 格式（32 位 hex）
+     */
+    isValidGistId(id) {
+        if (!id) return false;
+        return /^[a-f0-9]{20,}$/i.test(id);
+    }
+};
+
+/* ============================================================
+   💾 模組 3：Storage - 本地儲存管理
+   ============================================================ */
+const Storage = {
+    /**
+     * 儲存 Token（加密）
+     */
+    saveToken(token) {
+        if (!token) return false;
+        const encrypted = Utils.encrypt(token);
+        localStorage.setItem(CONFIG.STORAGE_KEYS.TOKEN, encrypted);
+        return true;
+    },
+    
+    /**
+     * 讀取 Token（解密）
+     */
+    getToken() {
+        const encrypted = localStorage.getItem(CONFIG.STORAGE_KEYS.TOKEN);
+        if (!encrypted) return null;
+        return Utils.decrypt(encrypted);
+    },
+    
+    /**
+     * 儲存 Gist ID
+     */
+    saveGistId(gistId) {
+        if (!gistId) return false;
+        localStorage.setItem(CONFIG.STORAGE_KEYS.GIST_ID, gistId);
+        return true;
+    },
+    
+    /**
+     * 讀取 Gist ID
+     */
+    getGistId() {
+        return localStorage.getItem(CONFIG.STORAGE_KEYS.GIST_ID);
+    },
+    
+    /**
+     * 檢查是否已完成設定
+     */
+    isConfigured() {
+        return !!(this.getToken() && this.getGistId());
+    },
+    
+    /**
+     * 儲存資料快取（離線時使用）
+     */
+    saveCache(data) {
+        try {
+            const json = JSON.stringify(data);
+            localStorage.setItem(CONFIG.STORAGE_KEYS.DATA_CACHE, json);
+            return true;
+        } catch (e) {
+            console.error('[Storage] 快取儲存失敗', e);
+            return false;
+        }
+    },
+    
+    /**
+     * 讀取資料快取
+     */
+    getCache() {
+        const json = localStorage.getItem(CONFIG.STORAGE_KEYS.DATA_CACHE);
+        if (!json) return null;
+        return Utils.safeParseJSON(json);
+    },
+    
+    /**
+     * 儲存最後同步時間
+     */
+    saveLastSync(time) {
+        localStorage.setItem(CONFIG.STORAGE_KEYS.LAST_SYNC, time || new Date().toISOString());
+    },
+    
+    /**
+     * 讀取最後同步時間
+     */
+    getLastSync() {
+        return localStorage.getItem(CONFIG.STORAGE_KEYS.LAST_SYNC);
+    },
+    
+    /**
+     * 清除所有設定（重設）
+     */
+    clearAll() {
+        Object.values(CONFIG.STORAGE_KEYS).forEach(key => {
+            localStorage.removeItem(key);
+        });
+    },
+    
+    /**
+     * 清除快取（保留設定）
+     */
+    clearCache() {
+        localStorage.removeItem(CONFIG.STORAGE_KEYS.DATA_CACHE);
+        localStorage.removeItem(CONFIG.STORAGE_KEYS.LAST_SYNC);
+    }
+};
+
+/* ============================================================
+   🌐 模組 4：GistAPI - GitHub Gist API 串接
+   ============================================================ */
+const GistAPI = {
+    /**
+     * 取得請求 Headers
+     */
+    getHeaders() {
+        const token = Storage.getToken();
+        return {
+            'Accept': 'application/vnd.github+json',
+            'Authorization': `Bearer ${token}`,
+            'X-GitHub-Api-Version': '2022-11-28',
+            'Content-Type': 'application/json'
+        };
+    },
+    
+    /**
+     * 帶逾時的 fetch 包裝
+     */
+    async fetchWithTimeout(url, options = {}, timeout = CONFIG.SYNC.TIMEOUT) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        try {
+            const response = await fetch(url, {
+                ...options,
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+            return response;
+        } catch (e) {
+            clearTimeout(timeoutId);
+            if (e.name === 'AbortError') {
+                throw new Error('請求逾時，請檢查網路');
+            }
+            throw e;
+        }
+    },
+    
+    /**
+     * 測試 Token 是否有效
+     */
+    async testToken(token) {
+        try {
+            const response = await this.fetchWithTimeout(
+                `${CONFIG.GITHUB_API}/user`,
+                {
+                    headers: {
+                        'Accept': 'application/vnd.github+json',
+                        'Authorization': `Bearer ${token}`,
+                        'X-GitHub-Api-Version': '2022-11-28'
+                    }
+                },
+                10000
+            );
+            
+            if (!response.ok) {
+                if (response.status === 401) throw new Error('Token 無效或已過期');
+                throw new Error(`API 錯誤：${response.status}`);
+            }
+            
+            const data = await response.json();
+            return { success: true, username: data.login };
+        } catch (e) {
+            return { success: false, error: e.message };
+        }
+    },
+    
+    /**
+     * 測試 Gist 是否可存取
+     */
+    async testGist(token, gistId) {
+        try {
+            const response = await this.fetchWithTimeout(
+                `${CONFIG.GITHUB_API}/gists/${gistId}`,
+                {
+                    headers: {
+                        'Accept': 'application/vnd.github+json',
+                        'Authorization': `Bearer ${token}`,
+                        'X-GitHub-Api-Version': '2022-11-28'
+                    }
+                },
+                10000
+            );
+            
+            if (!response.ok) {
+                if (response.status === 404) throw new Error('找不到 Gist，請檢查 Gist ID');
+                if (response.status === 401) throw new Error('Token 無權限存取此 Gist');
+                throw new Error(`API 錯誤：${response.status}`);
+            }
+            
+            const data = await response.json();
+            const hasFile = data.files && data.files[CONFIG.GIST_FILENAME];
+            
+            if (!hasFile) {
+                return { 
+                    success: true, 
+                    needInit: true,
+                    message: `Gist 中沒有 ${CONFIG.GIST_FILENAME}，將會自動建立`
+                };
+            }
+            
+            return { success: true, needInit: false };
+        } catch (e) {
+            return { success: false, error: e.message };
+        }
+    },
+    
+    /**
+     * 從 Gist 讀取資料
+     */
+    async load() {
+        const gistId = Storage.getGistId();
+        if (!gistId) throw new Error('未設定 Gist ID');
+        
+        const response = await this.fetchWithTimeout(
+            `${CONFIG.GITHUB_API}/gists/${gistId}`,
+            { headers: this.getHeaders() }
+        );
+        
+        if (!response.ok) {
+            throw new Error(`讀取失敗：HTTP ${response.status}`);
+        }
+        
+        const gist = await response.json();
+        const file = gist.files[CONFIG.GIST_FILENAME];
+        
+        // 如果檔案不存在，回傳預設資料
+        if (!file) {
+            console.warn('[GistAPI] Gist 中沒有 portfolio.json，使用預設資料');
+            return Utils.deepClone(CONFIG.DEFAULT_DATA);
+        }
+        
+        // 解析 JSON
+        const data = Utils.safeParseJSON(file.content);
+        if (!data) {
+            console.warn('[GistAPI] JSON 解析失敗，使用預設資料');
+            return Utils.deepClone(CONFIG.DEFAULT_DATA);
+        }
+        
+        // 確保資料結構完整（向後相容）
+        return this.normalizeData(data);
+    },
+    
+    /**
+     * 儲存資料到 Gist
+     */
+    async save(data) {
+        const gistId = Storage.getGistId();
+        if (!gistId) throw new Error('未設定 Gist ID');
+        
+        // 更新時間戳
+        const dataToSave = {
+            ...data,
+            lastUpdated: new Date().toISOString(),
+            version: CONFIG.DATA_VERSION
+        };
+        
+        const body = {
+            files: {
+                [CONFIG.GIST_FILENAME]: {
+                    content: JSON.stringify(dataToSave, null, 2)
+                }
+            }
+        };
+        
+        const response = await this.fetchWithTimeout(
+            `${CONFIG.GITHUB_API}/gists/${gistId}`,
+            {
+                method: 'PATCH',
+                headers: this.getHeaders(),
+                body: JSON.stringify(body)
+            }
+        );
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[GistAPI] 儲存失敗', response.status, errorText);
+            throw new Error(`儲存失敗：HTTP ${response.status}`);
+        }
+        
+        return dataToSave;
+    },
+    
+    /**
+     * 帶重試的儲存
+     */
+    async saveWithRetry(data, maxRetry = CONFIG.SYNC.MAX_RETRY) {
+        let lastError;
+        for (let i = 0; i < maxRetry; i++) {
+            try {
+                return await this.save(data);
+            } catch (e) {
+                lastError = e;
+                console.warn(`[GistAPI] 儲存失敗，重試 ${i + 1}/${maxRetry}`, e.message);
+                if (i < maxRetry - 1) {
+                    await Utils.sleep(1000 * (i + 1)); // 漸進延遲
+                }
+            }
+        }
+        throw lastError;
+    },
+    
+    /**
+     * 標準化資料結構（補齊缺少的欄位）
+     */
+    normalizeData(data) {
+        const normalized = Utils.deepClone(CONFIG.DEFAULT_DATA);
+        if (!data) return normalized;
+        
+        return {
+            version: data.version || CONFIG.DATA_VERSION,
+            lastUpdated: data.lastUpdated || null,
+            stocks: Array.isArray(data.stocks) ? data.stocks : [],
+            futures: Array.isArray(data.futures) ? data.futures : [],
+            watchlist: Array.isArray(data.watchlist) ? data.watchlist : [],
+            settings: { ...normalized.settings, ...(data.settings || {}) }
+        };
+    }
+};
+
+/* ============================================================
+   📋 模組 5：DataModel - 資料模型
+   ============================================================ */
+const DataModel = {
+    /**
+     * 建立持股紀錄
+     * @param {Object} input - 使用者輸入
+     */
+    createStock(input) {
+        return {
+            id: Utils.generateId(),
+            symbol: (input.symbol || '').trim().toUpperCase(),  // 股票代號
+            name: (input.name || '').trim(),                    // 股票名稱
+            shares: Number(input.shares) || 0,                  // 持有股數
+            avgCost: Number(input.avgCost) || 0,                // 平均成本
+            currentPrice: Number(input.currentPrice) || 0,      // 目前股價（手動輸入）
+            market: input.market || 'TW',                       // 市場：TW / US / HK
+            note: (input.note || '').trim(),                    // 備註
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+    },
+    
+    /**
+     * 建立期貨部位
+     */
+    createFutures(input) {
+        return {
+            id: Utils.generateId(),
+            symbol: (input.symbol || '').trim().toUpperCase(),  // 期貨代號（TX, MTX）
+            name: (input.name || '').trim(),                    // 名稱
+            direction: input.direction || 'long',               // long 多 / short 空
+            contracts: Number(input.contracts) || 0,            // 口數
+            entryPrice: Number(input.entryPrice) || 0,          // 進場點位
+            currentPrice: Number(input.currentPrice) || 0,      // 目前點位
+            pointValue: Number(input.pointValue) || 200,        // 每點價值（大台 200, 小台 50）
+            note: (input.note || '').trim(),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+    },
+    
+    /**
+     * 建立觀察清單項目
+     */
+    createWatchlist(input) {
+        return {
+            id: Utils.generateId(),
+            symbol: (input.symbol || '').trim().toUpperCase(),
+            name: (input.name || '').trim(),
+            targetPrice: Number(input.targetPrice) || 0,        // 目標價
+            currentPrice: Number(input.currentPrice) || 0,      // 目前價
+            market: input.market || 'TW',
+            note: (input.note || '').trim(),
+            createdAt: new Date().toISOString()
+        };
+    },
+    
+    /**
+     * 計算持股的損益
+     */
+    calcStockPnl(stock) {
+        const cost = stock.avgCost * stock.shares;
+        const value = stock.currentPrice * stock.shares;
+        const pnl = value - cost;
+        const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
+        return { cost, value, pnl, pnlPct };
+    },
+    
+    /**
+     * 計算期貨的損益
+     */
+    calcFuturesPnl(futures) {
+        const direction = futures.direction === 'long' ? 1 : -1;
+        const points = (futures.currentPrice - futures.entryPrice) * direction;
+        const pnl = points * futures.pointValue * futures.contracts;
+        const cost = futures.entryPrice * futures.pointValue * futures.contracts;
+        const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
+        return { points, pnl, pnlPct, cost };
+    },
+    
+    /**
+     * 計算觀察清單的差距
+     */
+    calcWatchDiff(item) {
+        if (!item.targetPrice || !item.currentPrice) {
+            return { diff: 0, diffPct: 0 };
+        }
+        const diff = item.currentPrice - item.targetPrice;
+        const diffPct = (diff / item.targetPrice) * 100;
+        return { diff, diffPct };
+    },
+    
+    /**
+     * 計算總覽資料
+     */
+    calcOverview(data) {
+        let totalCost = 0;
+        let totalValue = 0;
+        let totalPnl = 0;
+        
+        // 持股
+        (data.stocks || []).forEach(stock => {
+            const r = this.calcStockPnl(stock);
+            totalCost += r.cost;
+            totalValue += r.value;
+            totalPnl += r.pnl;
+        });
+        
+        // 期貨
+        (data.futures || []).forEach(f => {
+            const r = this.calcFuturesPnl(f);
+            totalPnl += r.pnl;
+        });
+        
+        const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+        
+        return {
+            totalAssets: totalValue,
+            totalCost,
+            totalPnl,
+            totalPnlPct,
+            stockCount: (data.stocks || []).length,
+            futuresCount: (data.futures || []).reduce((sum, f) => sum + (f.contracts || 0), 0),
+            watchCount: (data.watchlist || []).length
+        };
+    }
+};
+
+/* ============================================================
+   🎯 模組 6：State - 全域狀態管理
+   ============================================================ */
+const State = {
+    // 主要資料
+    data: Utils.deepClone(CONFIG.DEFAULT_DATA),
+    
+    // UI 狀態
+    activeTab: 'stocks',
+    syncStatus: 'idle',          // idle / syncing / synced / error
+    isLoading: false,
+    
+    // 同步狀態
+    lastSyncTime: null,
+    pendingSync: false,
+    autoSyncTimer: null,
+    
+    // 監聽器（觀察者模式）
+    listeners: [],
+    
+    /**
+     * 訂閱狀態變更
+     */
+    subscribe(callback) {
+        this.listeners.push(callback);
+        return () => {
+            this.listeners = this.listeners.filter(l => l !== callback);
+        };
+    },
+    
+    /**
+     * 通知所有監聽器
+     */
+    notify(event, payload) {
+        this.listeners.forEach(cb => {
+            try {
+                cb(event, payload);
+            } catch (e) {
+                console.error('[State] 監聽器錯誤', e);
+            }
+        });
+    },
+    
+    /**
+     * 設定資料
+     */
+    setData(data) {
+        this.data = data;
+        Storage.saveCache(data);
+        this.notify('data:changed', data);
+    },
+    
+    /**
+     * 設定同步狀態
+     */
+    setSyncStatus(status) {
+        this.syncStatus = status;
+        this.notify('sync:status', status);
+    },
+    
+    /**
+     * 新增持股
+     */
+    addStock(stock) {
+        this.data.stocks.push(stock);
+        this.setData(this.data);
+        this.notify('stock:added', stock);
+    },
+    
+    /**
+     * 更新持股
+     */
+    updateStock(id, updates) {
+        const idx = this.data.stocks.findIndex(s => s.id === id);
+        if (idx === -1) return false;
+        this.data.stocks[idx] = {
+            ...this.data.stocks[idx],
+            ...updates,
+            updatedAt: new Date().toISOString()
+        };
+        this.setData(this.data);
+        this.notify('stock:updated', this.data.stocks[idx]);
+        return true;
+    },
+    
+    /**
+     * 刪除持股
+     */
+    deleteStock(id) {
+        this.data.stocks = this.data.stocks.filter(s => s.id !== id);
+        this.setData(this.data);
+        this.notify('stock:deleted', id);
+    },
+    
+    /**
+     * 新增期貨
+     */
+    addFutures(futures) {
+        this.data.futures.push(futures);
+        this.setData(this.data);
+        this.notify('futures:added', futures);
+    },
+    
+    updateFutures(id, updates) {
+        const idx = this.data.futures.findIndex(f => f.id === id);
+        if (idx === -1) return false;
+        this.data.futures[idx] = {
+            ...this.data.futures[idx],
+            ...updates,
+            updatedAt: new Date().toISOString()
+        };
+        this.setData(this.data);
+        this.notify('futures:updated', this.data.futures[idx]);
+        return true;
+    },
+    
+    deleteFutures(id) {
+        this.data.futures = this.data.futures.filter(f => f.id !== id);
+        this.setData(this.data);
+        this.notify('futures:deleted', id);
+    },
+    
+    /**
+     * 新增觀察清單
+     */
+    addWatchlist(item) {
+        this.data.watchlist.push(item);
+        this.setData(this.data);
+        this.notify('watch:added', item);
+    },
+    
+    updateWatchlist(id, updates) {
+        const idx = this.data.watchlist.findIndex(w => w.id === id);
+        if (idx === -1) return false;
+        this.data.watchlist[idx] = { ...this.data.watchlist[idx], ...updates };
+        this.setData(this.data);
+        this.notify('watch:updated', this.data.watchlist[idx]);
+        return true;
+    },
+    
+    deleteWatchlist(id) {
+        this.data.watchlist = this.data.watchlist.filter(w => w.id !== id);
+        this.setData(this.data);
+        this.notify('watch:deleted', id);
+    }
+};
+
+/* ============================================================
+   ⚠️ Part 1 結束 - 等待 Part 2
+   ============================================================ */
+console.log('[Portfolio] Part 1 已載入，等待 Part 2...');
+
+/* ============================================================
+   📦 投資組合管理系統 - JavaScript Part 2
+   模組：Toast / Modal / UI / Sync / App
+   ============================================================ */
+
+/* ============================================================
+   🍞 模組 7：Toast - 通知訊息
+   ============================================================ */
+const Toast = {
+    container: null,
+    
+    init() {
+        this.container = document.getElementById('toastContainer');
+    },
+    
+    show(message, type = 'info', duration = CONFIG.TOAST_DURATION) {
+        if (!this.container) this.init();
+        
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        
+        const icons = {
+            success: '✅',
+            error: '❌',
+            info: 'ℹ️',
+            warning: '⚠️'
+        };
+        
+        toast.innerHTML = `
+            <span class="toast-icon">${icons[type] || icons.info}</span>
+            <span class="toast-message">${this.escapeHtml(message)}</span>
+        `;
+        
+        this.container.appendChild(toast);
+        
+        setTimeout(() => {
+            toast.style.animation = 'slideInRight 0.3s ease reverse';
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
+    },
+    
+    success(msg) { this.show(msg, 'success'); },
+    error(msg) { this.show(msg, 'error', 4000); },
+    info(msg) { this.show(msg, 'info'); },
+    warning(msg) { this.show(msg, 'warning'); },
+    
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+};
+
+/* ============================================================
+   🎭 模組 8：Modal - 彈窗管理
+   ============================================================ */
+const Modal = {
+    overlay: null,
+    content: null,
+    
+    init() {
+        this.overlay = document.getElementById('modalOverlay');
+        this.content = document.getElementById('modalContent');
+        
+        // 點擊背景關閉
+        this.overlay.addEventListener('click', (e) => {
+            if (e.target === this.overlay) this.close();
+        });
+        
+        // ESC 關閉
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.overlay.classList.contains('active')) {
+                this.close();
+            }
+        });
+    },
+    
+    open(html) {
+        this.content.innerHTML = html;
+        this.overlay.classList.add('active');
+    },
+    
+    close() {
+        this.overlay.classList.remove('active');
+        setTimeout(() => { this.content.innerHTML = ''; }, 200);
+    },
+    
+    /**
+     * 開啟新增/編輯持股的表單
+     */
+    openStockForm(existing = null) {
+        const isEdit = !!existing;
+        const data = existing || {};
+        
+        const html = `
+            <div class="modal-header">
+                <h3 class="modal-title">${isEdit ? '✏️ 編輯持股' : '＋ 新增持股'}</h3>
+                <button class="modal-close" onclick="Modal.close()">×</button>
+            </div>
+            <form id="stockForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>股票代號 *</label>
+                        <input type="text" id="sf_symbol" required 
+                               value="${data.symbol || ''}" placeholder="例如：2330">
+                    </div>
+                    <div class="form-group">
+                        <label>市場</label>
+                        <select id="sf_market">
+                            <option value="TW" ${data.market === 'TW' ? 'selected' : ''}>台股</option>
+                            <option value="US" ${data.market === 'US' ? 'selected' : ''}>美股</option>
+                            <option value="HK" ${data.market === 'HK' ? 'selected' : ''}>港股</option>
+                            <option value="OTHER" ${data.market === 'OTHER' ? 'selected' : ''}>其他</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>名稱</label>
+                    <input type="text" id="sf_name" value="${data.name || ''}" placeholder="例如：台積電">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>持有股數 *</label>
+                        <input type="number" id="sf_shares" required step="1" min="0"
+                               value="${data.shares || ''}" placeholder="1000">
+                    </div>
+                    <div class="form-group">
+                        <label>平均成本 *</label>
+                        <input type="number" id="sf_avgCost" required step="0.01" min="0"
+                               value="${data.avgCost || ''}" placeholder="500.00">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>目前股價</label>
+                    <input type="number" id="sf_currentPrice" step="0.01" min="0"
+                           value="${data.currentPrice || ''}" placeholder="600.00">
+                </div>
+                <div class="form-group">
+                    <label>備註</label>
+                    <input type="text" id="sf_note" value="${data.note || ''}" placeholder="可選">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="Modal.close()">取消</button>
+                    <button type="submit" class="btn btn-primary">${isEdit ? '更新' : '新增'}</button>
+                </div>
+            </form>
+        `;
+        
+        this.open(html);
+        
+        document.getElementById('stockForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = {
+                symbol: document.getElementById('sf_symbol').value,
+                name: document.getElementById('sf_name').value,
+                market: document.getElementById('sf_market').value,
+                shares: document.getElementById('sf_shares').value,
+                avgCost: document.getElementById('sf_avgCost').value,
+                currentPrice: document.getElementById('sf_currentPrice').value,
+                note: document.getElementById('sf_note').value
+            };
+            
+            if (isEdit) {
+                State.updateStock(existing.id, input);
+                Toast.success('持股已更新');
+            } else {
+                State.addStock(DataModel.createStock(input));
+                Toast.success('持股已新增');
+            }
+            
+            this.close();
+            Sync.scheduleSync();
+        });
+    },
+    
+    /**
+     * 期貨表單
+     */
+    openFuturesForm(existing = null) {
+        const isEdit = !!existing;
+        const data = existing || {};
+        
+        const html = `
+            <div class="modal-header">
+                <h3 class="modal-title">${isEdit ? '✏️ 編輯期貨' : '＋ 新增期貨'}</h3>
+                <button class="modal-close" onclick="Modal.close()">×</button>
+            </div>
+            <form id="futuresForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>商品代號 *</label>
+                        <input type="text" id="ff_symbol" required 
+                               value="${data.symbol || ''}" placeholder="例如：TX">
+                    </div>
+                    <div class="form-group">
+                        <label>方向 *</label>
+                        <select id="ff_direction">
+                            <option value="long" ${data.direction === 'long' ? 'selected' : ''}>多單 📈</option>
+                            <option value="short" ${data.direction === 'short' ? 'selected' : ''}>空單 📉</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>名稱</label>
+                    <input type="text" id="ff_name" value="${data.name || ''}" placeholder="例如：台指期">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>口數 *</label>
+                        <input type="number" id="ff_contracts" required step="1" min="1"
+                               value="${data.contracts || 1}" placeholder="1">
+                    </div>
+                    <div class="form-group">
+                        <label>每點價值 *</label>
+                        <input type="number" id="ff_pointValue" required step="1" min="1"
+                               value="${data.pointValue || 200}" placeholder="200">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>進場點位 *</label>
+                        <input type="number" id="ff_entryPrice" required step="0.01"
+                               value="${data.entryPrice || ''}" placeholder="17500">
+                    </div>
+                    <div class="form-group">
+                        <label>目前點位</label>
+                        <input type="number" id="ff_currentPrice" step="0.01"
+                               value="${data.currentPrice || ''}" placeholder="17800">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>備註</label>
+                    <input type="text" id="ff_note" value="${data.note || ''}" placeholder="可選">
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-tertiary); margin-bottom: 12px; padding: 10px; background: var(--bg-tertiary); border-radius: 8px;">
+                    💡 大台指每點 200 元，小台指每點 50 元
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="Modal.close()">取消</button>
+                    <button type="submit" class="btn btn-primary">${isEdit ? '更新' : '新增'}</button>
+                </div>
+            </form>
+        `;
+        
+        this.open(html);
+        
+        document.getElementById('futuresForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = {
+                symbol: document.getElementById('ff_symbol').value,
+                name: document.getElementById('ff_name').value,
+                direction: document.getElementById('ff_direction').value,
+                contracts: document.getElementById('ff_contracts').value,
+                pointValue: document.getElementById('ff_pointValue').value,
+                entryPrice: document.getElementById('ff_entryPrice').value,
+                currentPrice: document.getElementById('ff_currentPrice').value,
+                note: document.getElementById('ff_note').value
+            };
+            
+            if (isEdit) {
+                State.updateFutures(existing.id, input);
+                Toast.success('期貨部位已更新');
+            } else {
+                State.addFutures(DataModel.createFutures(input));
+                Toast.success('期貨部位已新增');
+            }
+            
+            this.close();
+            Sync.scheduleSync();
+        });
+    },
+    
+    /**
+     * 觀察清單表單
+     */
+    openWatchlistForm(existing = null) {
+        const isEdit = !!existing;
+        const data = existing || {};
+        
+        const html = `
+            <div class="modal-header">
+                <h3 class="modal-title">${isEdit ? '✏️ 編輯觀察項目' : '＋ 新增觀察項目'}</h3>
+                <button class="modal-close" onclick="Modal.close()">×</button>
+            </div>
+            <form id="watchForm">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>代號 *</label>
+                        <input type="text" id="wf_symbol" required 
+                               value="${data.symbol || ''}" placeholder="例如：2454">
+                    </div>
+                    <div class="form-group">
+                        <label>市場</label>
+                        <select id="wf_market">
+                            <option value="TW" ${data.market === 'TW' ? 'selected' : ''}>台股</option>
+                            <option value="US" ${data.market === 'US' ? 'selected' : ''}>美股</option>
+                            <option value="HK" ${data.market === 'HK' ? 'selected' : ''}>港股</option>
+                            <option value="OTHER" ${data.market === 'OTHER' ? 'selected' : ''}>其他</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>名稱</label>
+                    <input type="text" id="wf_name" value="${data.name || ''}" placeholder="例如：聯發科">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>目標價</label>
+                        <input type="number" id="wf_targetPrice" step="0.01"
+                               value="${data.targetPrice || ''}" placeholder="1000">
+                    </div>
+                    <div class="form-group">
+                        <label>目前價</label>
+                        <input type="number" id="wf_currentPrice" step="0.01"
+                               value="${data.currentPrice || ''}" placeholder="1100">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>備註</label>
+                    <input type="text" id="wf_note" value="${data.note || ''}" placeholder="可選">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="Modal.close()">取消</button>
+                    <button type="submit" class="btn btn-primary">${isEdit ? '更新' : '新增'}</button>
+                </div>
+            </form>
+        `;
+        
+        this.open(html);
+        
+        document.getElementById('watchForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const input = {
+                symbol: document.getElementById('wf_symbol').value,
+                name: document.getElementById('wf_name').value,
+                market: document.getElementById('wf_market').value,
+                targetPrice: document.getElementById('wf_targetPrice').value,
+                currentPrice: document.getElementById('wf_currentPrice').value,
+                note: document.getElementById('wf_note').value
+            };
+            
+            if (isEdit) {
+                State.updateWatchlist(existing.id, input);
+                Toast.success('觀察項目已更新');
+            } else {
+                State.addWatchlist(DataModel.createWatchlist(input));
+                Toast.success('觀察項目已新增');
+            }
+            
+            this.close();
+            Sync.scheduleSync();
+        });
+    },
+    
+    /**
+     * 確認對話框
+     */
+    confirm(title, message, onConfirm) {
+        const html = `
+            <div class="modal-header">
+                <h3 class="modal-title">${title}</h3>
+                <button class="modal-close" onclick="Modal.close()">×</button>
+            </div>
+            <div style="margin-bottom: 24px; color: var(--text-secondary); line-height: 1.7;">
+                ${message}
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="Modal.close()">取消</button>
+                <button class="btn btn-danger" id="confirmYesBtn">確認</button>
+            </div>
+        `;
+        this.open(html);
+        document.getElementById('confirmYesBtn').addEventListener('click', () => {
+            this.close();
+            onConfirm();
+        });
+    }
+};
+
+/* ============================================================
+   🎨 模組 9：UI - 介面渲染引擎
+   ============================================================ */
+const UI = {
+    /**
+     * 渲染所有內容
+     */
+    renderAll() {
+        this.renderOverview();
+        this.renderStocks();
+        this.renderFutures();
+        this.renderWatchlist();
+        this.renderSettings();
+    },
+    
+    /**
+     * 渲染總覽卡片
+     */
+    renderOverview() {
+        const overview = DataModel.calcOverview(State.data);
+        
+        document.getElementById('totalAssets').textContent = Utils.formatMoney(overview.totalAssets);
+        
+        const pnlEl = document.getElementById('totalPnl');
+        const pnlPctEl = document.getElementById('totalPnlPct');
+        pnlEl.textContent = Utils.formatMoney(overview.totalPnl);
+        pnlPctEl.textContent = Utils.formatPercent(overview.totalPnlPct);
+        
+        // 漲跌色彩
+        const cls = overview.totalPnl > 0 ? 'up' : (overview.totalPnl < 0 ? 'down' : 'flat');
+        pnlEl.style.color = cls === 'up' ? 'var(--color-up)' 
+                          : (cls === 'down' ? 'var(--color-down)' : 'var(--text-primary)');
+        pnlPctEl.className = `overview-change ${cls}`;
+        
+        document.getElementById('stockCount').textContent = overview.stockCount;
+        document.getElementById('futuresCount').textContent = overview.futuresCount;
+    },
+    
+    /**
+     * 渲染持股列表
+     */
+    renderStocks() {
+        const container = document.getElementById('stocksContainer');
+        const stocks = State.data.stocks;
+        
+        if (stocks.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📭</div>
+                    <div class="empty-state-text">尚未新增任何持股</div>
+                    <button class="btn btn-primary" onclick="Modal.openStockForm()">＋ 立即新增</button>
+                </div>
+            `;
+            return;
+        }
+        
+        const rows = stocks.map(s => {
+            const r = DataModel.calcStockPnl(s);
+            const cls = r.pnl > 0 ? 'text-up' : (r.pnl < 0 ? 'text-down' : 'text-flat');
+            return `
+                <tr>
+                    <td><strong>${s.symbol}</strong></td>
+                    <td>${s.name || '—'}</td>
+                    <td>${Utils.formatNumber(s.shares, 0)}</td>
+                    <td>${Utils.formatNumber(s.avgCost)}</td>
+                    <td>${Utils.formatNumber(s.currentPrice)}</td>
+                    <td>${Utils.formatMoney(r.value)}</td>
+                    <td class="${cls}">${Utils.formatMoney(r.pnl)}</td>
+                    <td class="${cls}">${Utils.formatPercent(r.pnlPct)}</td>
+                    <td>
+                        <button class="btn btn-secondary btn-icon" onclick="UI.editStock('${s.id}')" title="編輯">✏️</button>
+                        <button class="btn btn-danger btn-icon" onclick="UI.deleteStock('${s.id}')" title="刪除">🗑️</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        
+        container.innerHTML = `
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>代號</th>
+                            <th>名稱</th>
+                            <th>股數</th>
+                            <th>均價</th>
+                            <th>現價</th>
+                            <th>市值</th>
+                            <th>損益</th>
+                            <th>損益率</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    },
+    
+    /**
+     * 渲染期貨列表
+     */
+    renderFutures() {
+        const container = document.getElementById('futuresContainer');
+        const futures = State.data.futures;
+        
+        if (futures.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📭</div>
+                    <div class="empty-state-text">尚未新增任何期貨部位</div>
+                    <button class="btn btn-primary" onclick="Modal.openFuturesForm()">＋ 立即新增</button>
+                </div>
+            `;
+            return;
+        }
+        
+        const rows = futures.map(f => {
+            const r = DataModel.calcFuturesPnl(f);
+            const cls = r.pnl > 0 ? 'text-up' : (r.pnl < 0 ? 'text-down' : 'text-flat');
+            const dirIcon = f.direction === 'long' ? '📈 多' : '📉 空';
+            const dirCls = f.direction === 'long' ? 'text-up' : 'text-down';
+            return `
+                <tr>
+                    <td><strong>${f.symbol}</strong></td>
+                    <td>${f.name || '—'}</td>
+                    <td class="${dirCls}">${dirIcon}</td>
+                    <td>${f.contracts} 口</td>
+                    <td>${Utils.formatNumber(f.entryPrice)}</td>
+                    <td>${Utils.formatNumber(f.currentPrice)}</td>
+                    <td class="${cls}">${Utils.formatNumber(r.points)}</td>
+                    <td class="${cls}">${Utils.formatMoney(r.pnl)}</td>
+                    <td>
+                        <button class="btn btn-secondary btn-icon" onclick="UI.editFutures('${f.id}')" title="編輯">✏️</button>
+                        <button class="btn btn-danger btn-icon" onclick="UI.deleteFutures('${f.id}')" title="刪除">🗑️</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        
+        container.innerHTML = `
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>代號</th>
+                            <th>名稱</th>
+                            <th>方向</th>
+                            <th>口數</th>
+                            <th>進場價</th>
+                            <th>現價</th>
+                            <th>點數</th>
+                            <th>損益</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    },
+    
+    /**
+     * 渲染觀察清單
+     */
+    renderWatchlist() {
+        const container = document.getElementById('watchlistContainer');
+        const items = State.data.watchlist;
+        
+        if (items.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">📭</div>
+                    <div class="empty-state-text">尚未新增任何觀察項目</div>
+                    <button class="btn btn-primary" onclick="Modal.openWatchlistForm()">＋ 立即新增</button>
+                </div>
+            `;
+            return;
+        }
+        
+        const rows = items.map(w => {
+            const r = DataModel.calcWatchDiff(w);
+            const cls = r.diff > 0 ? 'text-up' : (r.diff < 0 ? 'text-down' : 'text-flat');
+            return `
+                <tr>
+                    <td><strong>${w.symbol}</strong></td>
+                    <td>${w.name || '—'}</td>
+                    <td>${Utils.formatNumber(w.targetPrice)}</td>
+                    <td>${Utils.formatNumber(w.currentPrice)}</td>
+                    <td class="${cls}">${Utils.formatNumber(r.diff)}</td>
+                    <td class="${cls}">${Utils.formatPercent(r.diffPct)}</td>
+                    <td>${w.note || '—'}</td>
+                    <td>
+                        <button class="btn btn-secondary btn-icon" onclick="UI.editWatch('${w.id}')" title="編輯">✏️</button>
+                        <button class="btn btn-danger btn-icon" onclick="UI.deleteWatch('${w.id}')" title="刪除">🗑️</button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        
+        container.innerHTML = `
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>代號</th>
+                            <th>名稱</th>
+                            <th>目標價</th>
+                            <th>目前價</th>
+                            <th>差距</th>
+                            <th>差距%</th>
+                            <th>備註</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    },
+    
+    /**
+     * 渲染設定頁
+     */
+    renderSettings() {
+        const token = Storage.getToken();
+        const gistId = Storage.getGistId();
+        const lastSync = Storage.getLastSync();
+        
+        if (token) {
+            // 顯示遮罩後的 Token
+            const masked = token.substring(0, 8) + '••••••••' + token.substring(token.length - 4);
+            document.getElementById('settingsToken').value = masked;
+        }
+        document.getElementById('settingsGistId').value = gistId || '';
+        document.getElementById('lastSyncTime').textContent = Utils.formatRelativeTime(lastSync);
+        
+        const total = State.data.stocks.length + State.data.futures.length + State.data.watchlist.length;
+        document.getElementById('dataCount').textContent = total + ' 筆';
+    },
+    
+    /**
+     * 更新同步狀態指示器
+     */
+    updateSyncStatus(status) {
+        const dot = document.getElementById('syncDot');
+        const text = document.getElementById('syncText');
+        
+        dot.className = 'sync-dot';
+        
+        switch (status) {
+            case 'syncing':
+                dot.classList.add('syncing');
+                text.textContent = '同步中...';
+                break;
+            case 'synced':
+                dot.classList.add('synced');
+                text.textContent = '已同步 ' + Utils.formatRelativeTime(Storage.getLastSync());
+                break;
+            case 'error':
+                dot.classList.add('error');
+                text.textContent = '同步失敗';
+                break;
+            default:
+                text.textContent = '待機中';
+        }
+    },
+    
+    /**
+     * 切換分頁
+     */
+    switchTab(tabName) {
+        State.activeTab = tabName;
+        
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tabName);
+        });
+        
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.toggle('active', content.id === `tab-${tabName}`);
+        });
+    },
+    
+    // ============ 操作快捷方法 ============
+    editStock(id) {
+        const stock = State.data.stocks.find(s => s.id === id);
+        if (stock) Modal.openStockForm(stock);
+    },
+    
+    deleteStock(id) {
+        const stock = State.data.stocks.find(s => s.id === id);
+        if (!stock) return;
+        Modal.confirm(
+            '⚠️ 確認刪除',
+            `確定要刪除「${stock.symbol} ${stock.name || ''}」嗎？此操作無法復原。`,
+            () => {
+                State.deleteStock(id);
+                Toast.success('已刪除');
+                Sync.scheduleSync();
+            }
+        );
+    },
+    
+    editFutures(id) {
+        const f = State.data.futures.find(x => x.id === id);
+        if (f) Modal.openFuturesForm(f);
+    },
+    
+    deleteFutures(id) {
+        const f = State.data.futures.find(x => x.id === id);
+        if (!f) return;
+        Modal.confirm(
+            '⚠️ 確認刪除',
+            `確定要刪除期貨部位「${f.symbol}」嗎？`,
+            () => {
+                State.deleteFutures(id);
+                Toast.success('已刪除');
+                Sync.scheduleSync();
+            }
+        );
+    },
+    
+    editWatch(id) {
+        const w = State.data.watchlist.find(x => x.id === id);
+        if (w) Modal.openWatchlistForm(w);
+    },
+    
+    deleteWatch(id) {
+        const w = State.data.watchlist.find(x => x.id === id);
+        if (!w) return;
+        Modal.confirm(
+            '⚠️ 確認刪除',
+            `確定要從觀察清單刪除「${w.symbol}」嗎？`,
+            () => {
+                State.deleteWatchlist(id);
+                Toast.success('已刪除');
+                Sync.scheduleSync();
+            }
+        );
+    }
+};
+
+/* ============================================================
+   🔄 模組 10：Sync - 自動同步引擎
+   ============================================================ */
+const Sync = {
+    debouncedSync: null,
+    
+    init() {
+        // 建立防抖版本的同步
+        this.debouncedSync = Utils.debounce(
+            () => this.syncToCloud(),
+            CONFIG.SYNC.DEBOUNCE_DELAY
+        );
+        
+        // 啟動自動同步
+        this.startAutoSync();
+        
+        // 監聽網路狀態
+        window.addEventListener('online', () => {
+            Toast.info('網路已連接，準備同步');
+            this.syncToCloud();
+        });
+        
+        window.addEventListener('offline', () => {
+            Toast.warning('離線中，資料將儲存在本地');
+        });
+        
+        // 頁面切回前景時自動拉取
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) {
+                this.syncFromCloud(true);
+            }
+        });
+    },
+    
+    /**
+     * 啟動自動同步定時器
+     */
+    startAutoSync() {
+        if (State.autoSyncTimer) clearInterval(State.autoSyncTimer);
+        State.autoSyncTimer = setInterval(() => {
+            this.syncFromCloud(true);
+        }, CONFIG.SYNC.AUTO_SYNC_INTERVAL);
+        console.log(`[Sync] 自動同步已啟動（${CONFIG.SYNC.AUTO_SYNC_INTERVAL / 1000} 秒）`);
+    },
+    
+    /**
+     * 排程同步（防抖）
+     */
+    scheduleSync() {
+        State.setSyncStatus('syncing');
+        UI.updateSyncStatus('syncing');
+        this.debouncedSync();
+    },
+    
+    /**
+     * 從雲端拉取資料
+     */
+    async syncFromCloud(silent = false) {
+        if (!Storage.isConfigured()) return;
+        if (!navigator.onLine) {
+            if (!silent) Toast.warning('離線中，無法同步');
+            return;
+        }
+        
+        try {
+            State.setSyncStatus('syncing');
+            UI.updateSyncStatus('syncing');
+            
+            const cloudData = await GistAPI.load();
+            State.setData(cloudData);
+            Storage.saveLastSync(new Date().toISOString());
+            
+            UI.renderAll();
+            State.setSyncStatus('synced');
+            UI.updateSyncStatus('synced');
+            
+            if (!silent) Toast.success('已從雲端同步最新資料');
+            console.log('[Sync] 從雲端同步成功');
+        } catch (e) {
+            console.error('[Sync] 從雲端同步失敗', e);
+            State.setSyncStatus('error');
+            UI.updateSyncStatus('error');
+            if (!silent) Toast.error('同步失敗：' + e.message);
+        }
+    },
+    
+    /**
+     * 推送資料到雲端
+     */
+    async syncToCloud() {
+        if (!Storage.isConfigured()) return;
+        if (!navigator.onLine) {
+            Toast.warning('離線中，資料已暫存本地');
+            return;
+        }
+        
+        try {
+            State.setSyncStatus('syncing');
+            UI.updateSyncStatus('syncing');
+            
+            await GistAPI.saveWithRetry(State.data);
+            Storage.saveLastSync(new Date().toISOString());
+            
+            State.setSyncStatus('synced');
+            UI.updateSyncStatus('synced');
+            UI.renderSettings();
+            
+            console.log('[Sync] 推送雲端成功');
+        } catch (e) {
+            console.error('[Sync] 推送雲端失敗', e);
+            State.setSyncStatus('error');
+            UI.updateSyncStatus('error');
+            Toast.error('儲存失敗：' + e.message);
+        }
+    },
+    
+    /**
+     * 手動同步（雙向）
+     */
+    async manualSync() {
+        Toast.info('開始同步...');
+        await this.syncToCloud();
+        await this.syncFromCloud(false);
+    }
+};
+
+/* ============================================================
+   🚀 模組 11：App - 主應用程式
+   ============================================================ */
+const App = {
+    /**
+     * 應用程式啟動
+     */
+    async start() {
+        console.log(`[Portfolio] 啟動 v${CONFIG.VERSION}`);
+        
+        // 初始化各模組
+        Toast.init();
+        Modal.init();
+        
+        // 檢查是否已設定
+        if (!Storage.isConfigured()) {
+            this.showSetup();
+            return;
+        }
+        
+        // 顯示載入動畫
+        document.getElementById('loadingOverlay').classList.remove('hidden');
+        
+        // 載入快取（先顯示舊資料）
+        const cache = Storage.getCache();
+        if (cache) {
+            State.setData(cache);
+        }
+        
+        // 顯示主介面
+        document.getElementById('setupScreen').classList.remove('active');
+        document.getElementById('appContainer').classList.add('active');
+        UI.renderAll();
+        
+        // 綁定事件
+        this.bindEvents();
+        
+        // 啟動同步引擎
+        Sync.init();
+        
+        // 從雲端拉取最新資料
+        await Sync.syncFromCloud(false);
+        
+        // 隱藏載入動畫
+        setTimeout(() => {
+            document.getElementById('loadingOverlay').classList.add('hidden');
+        }, 300);
+    },
+    
+    /**
+     * 顯示設定頁
+     */
+    showSetup() {
+        document.getElementById('loadingOverlay').classList.add('hidden');
+        document.getElementById('setupScreen').classList.add('active');
+        document.getElementById('appContainer').classList.remove('active');
+        
+        document.getElementById('setupSaveBtn').addEventListener('click', () => this.handleSetupSave());
+    },
+    
+    /**
+     * 處理初始設定儲存
+     */
+    async handleSetupSave() {
+        const token = document.getElementById('setupToken').value.trim();
+        const gistId = document.getElementById('setupGistId').value.trim();
+        
+        // 驗證格式
+        if (!Utils.isValidToken(token)) {
+            Toast.error('Token 格式錯誤（應為 github_pat_xxx 或 ghp_xxx）');
+            return;
+        }
+        if (!Utils.isValidGistId(gistId)) {
+            Toast.error('Gist ID 格式錯誤（應為 20 位以上的英數字）');
+            return;
+        }
+        
+        // 顯示測試中
+        const btn = document.getElementById('setupSaveBtn');
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '驗證中...';
+        
+        // 測試 Token
+        const tokenTest = await GistAPI.testToken(token);
+        if (!tokenTest.success) {
+            Toast.error('Token 驗證失敗：' + tokenTest.error);
+            btn.disabled = false;
+            btn.textContent = originalText;
+            return;
+        }
+        
+        // 測試 Gist
+        const gistTest = await GistAPI.testGist(token, gistId);
+        if (!gistTest.success) {
+            Toast.error('Gist 驗證失敗：' + gistTest.error);
+            btn.disabled = false;
+            btn.textContent = originalText;
+            return;
+        }
+        
+        // 儲存設定
+        Storage.saveToken(token);
+        Storage.saveGistId(gistId);
+        
+        Toast.success(`歡迎，${tokenTest.username}！`);
+        
+        // 啟動主程式
+        setTimeout(() => this.start(), 500);
+    },
+    
+    /**
+     * 綁定全域事件
+     */
+    bindEvents() {
+        // 分頁切換
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                UI.switchTab(btn.dataset.tab);
+                if (btn.dataset.tab === 'settings') UI.renderSettings();
+            });
+        });
+        
+        // 新增按鈕
+        document.getElementById('addStockBtn').addEventListener('click', () => Modal.openStockForm());
+        document.getElementById('addFuturesBtn').addEventListener('click', () => Modal.openFuturesForm());
+        document.getElementById('addWatchBtn').addEventListener('click', () => Modal.openWatchlistForm());
+        
+        // 設定頁按鈕
+        document.getElementById('manualSyncBtn').addEventListener('click', () => Sync.manualSync());
+        document.getElementById('exportBtn').addEventListener('click', () => this.exportData());
+        document.getElementById('importBtn').addEventListener('click', () => this.importData());
+        document.getElementById('resetBtn').addEventListener('click', () => this.resetSettings());
+        
+        // 訂閱資料變化 → 自動重新渲染
+        State.subscribe((event) => {
+            if (event.startsWith('data:') || 
+                event.startsWith('stock:') || 
+                event.startsWith('futures:') || 
+                event.startsWith('watch:')) {
+                UI.renderAll();
+            }
+        });
+    },
+    
+    /**
+     * 匯出資料為 JSON 檔
+     */
+    exportData() {
+        const json = JSON.stringify(State.data, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const date = new Date().toISOString().slice(0, 10);
+        a.href = url;
+        a.download = `portfolio_backup_${date}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        Toast.success('已匯出備份檔');
+    },
+    
+    /**
+     * 匯入 JSON 檔
+     */
+    importData() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'application/json';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                try {
+                    const data = JSON.parse(ev.target.result);
+                    const normalized = GistAPI.normalizeData(data);
+                    Modal.confirm(
+                        '⚠️ 確認匯入',
+                        `將會覆蓋目前所有資料，確定嗎？<br>匯入：${normalized.stocks.length} 檔持股、${normalized.futures.length} 筆期貨、${normalized.watchlist.length} 筆觀察清單`,
+                        () => {
+                            State.setData(normalized);
+                            UI.renderAll();
+                            Toast.success('匯入成功');
+                            Sync.scheduleSync();
+                        }
+                    );
+                } catch (err) {
+                    Toast.error('檔案格式錯誤');
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    },
+    
+    /**
+     * 重設所有設定
+     */
+    resetSettings() {
+        Modal.confirm(
+            '⚠️ 重設設定',
+            '將會清除 Token、Gist ID 和本地快取。<br>雲端資料不會被刪除。<br>確定繼續嗎？',
+            () => {
+                Storage.clearAll();
+                Toast.info('設定已清除，重新載入中...');
+                setTimeout(() => location.reload(), 1000);
+            }
+        );
+    }
+};
+
+/* ============================================================
+   🎬 啟動應用程式
+   ============================================================ */
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => App.start());
 } else {
-    document.getElementById('setupScreen').classList.add('active');
+    App.start();
 }
+
+console.log('[Portfolio] Part 2 已載入，應用程式即將啟動');
+
+
 </script>
 
 </body>

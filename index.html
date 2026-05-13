@@ -1852,6 +1852,439 @@ const SnapshotManager = {
     return history.snapshots.filter(s => s.date >= cutoffStr);
   }
 };
+   
+// ============================================================
+// 📊 StockDB - 股票資料庫
+// ============================================================
+const StockDB = {
+  // ----- 台股常見清單（代號 / 名稱 / 注音首字 / 拼音首字） -----
+  TW: [
+    // 權值股 / ETF
+    { code: '0050', name: '元大台灣50', zhuyin: 'ㄩㄉㄊㄨ', pinyin: 'ydtw' },
+    { code: '0056', name: '元大高股息', zhuyin: 'ㄩㄉㄍㄍㄒ', pinyin: 'ydggx' },
+    { code: '00878', name: '國泰永續高股息', zhuyin: 'ㄍㄊㄩㄒㄍㄍㄒ', pinyin: 'gtyxggx' },
+    { code: '00919', name: '群益台灣精選高息', zhuyin: 'ㄑㄧㄊㄨㄐㄒㄍㄒ', pinyin: 'qytwjxgx' },
+    { code: '00929', name: '復華台灣科技優息', zhuyin: 'ㄈㄏㄊㄨㄎㄐㄧㄒ', pinyin: 'fhtwkjyx' },
+    { code: '00940', name: '元大台灣價值高息', zhuyin: 'ㄩㄉㄊㄨㄐㄓㄍㄒ', pinyin: 'ydtwjzgx' },
+    { code: '006208', name: '富邦台50', zhuyin: 'ㄈㄅㄊ', pinyin: 'fbt' },
+
+    // 半導體
+    { code: '2330', name: '台積電', zhuyin: 'ㄊㄐㄉ', pinyin: 'tjd' },
+    { code: '2454', name: '聯發科', zhuyin: 'ㄌㄈㄎ', pinyin: 'lfk' },
+    { code: '2303', name: '聯電', zhuyin: 'ㄌㄉ', pinyin: 'ld' },
+    { code: '3711', name: '日月光投控', zhuyin: 'ㄖㄩㄍㄊㄎ', pinyin: 'rygtk' },
+    { code: '2408', name: '南亞科', zhuyin: 'ㄋㄧㄎ', pinyin: 'nyk' },
+    { code: '3034', name: '聯詠', zhuyin: 'ㄌㄩ', pinyin: 'ly' },
+    { code: '3661', name: '世芯-KY', zhuyin: 'ㄕㄒ', pinyin: 'sx' },
+    { code: '6488', name: '環球晶', zhuyin: 'ㄏㄑㄐ', pinyin: 'hqj' },
+    { code: '5347', name: '世界', zhuyin: 'ㄕㄐ', pinyin: 'sj' },
+
+    // 電子 / 蘋概
+    { code: '2317', name: '鴻海', zhuyin: 'ㄏㄏ', pinyin: 'hh' },
+    { code: '2382', name: '廣達', zhuyin: 'ㄍㄉ', pinyin: 'gd' },
+    { code: '2357', name: '華碩', zhuyin: 'ㄏㄕ', pinyin: 'hs' },
+    { code: '2353', name: '宏碁', zhuyin: 'ㄏㄑ', pinyin: 'hq' },
+    { code: '2474', name: '可成', zhuyin: 'ㄎㄔ', pinyin: 'kc' },
+    { code: '2376', name: '技嘉', zhuyin: 'ㄐㄐ', pinyin: 'jj' },
+    { code: '2377', name: '微星', zhuyin: 'ㄨㄒ', pinyin: 'wx' },
+    { code: '3231', name: '緯創', zhuyin: 'ㄨㄔ', pinyin: 'wc' },
+    { code: '2356', name: '英業達', zhuyin: 'ㄧㄧㄉ', pinyin: 'yyd' },
+    { code: '3017', name: '奇鋐', zhuyin: 'ㄑㄏ', pinyin: 'qh' },
+
+    // AI 概念
+    { code: '2308', name: '台達電', zhuyin: 'ㄊㄉㄉ', pinyin: 'tdd' },
+    { code: '3008', name: '大立光', zhuyin: 'ㄉㄌㄍ', pinyin: 'dlg' },
+    { code: '6669', name: '緯穎', zhuyin: 'ㄨㄧ', pinyin: 'wy' },
+    { code: '4966', name: '譜瑞-KY', zhuyin: 'ㄆㄖ', pinyin: 'pr' },
+    { code: '6515', name: '穎崴', zhuyin: 'ㄧㄨ', pinyin: 'yw' },
+
+    // 金融
+    { code: '2881', name: '富邦金', zhuyin: 'ㄈㄅㄐ', pinyin: 'fbj' },
+    { code: '2882', name: '國泰金', zhuyin: 'ㄍㄊㄐ', pinyin: 'gtj' },
+    { code: '2891', name: '中信金', zhuyin: 'ㄓㄒㄐ', pinyin: 'zxj' },
+    { code: '2892', name: '第一金', zhuyin: 'ㄉㄧㄐ', pinyin: 'dyj' },
+    { code: '2884', name: '玉山金', zhuyin: 'ㄩㄕㄐ', pinyin: 'ysj' },
+    { code: '2886', name: '兆豐金', zhuyin: 'ㄓㄈㄐ', pinyin: 'zfj' },
+    { code: '2885', name: '元大金', zhuyin: 'ㄩㄉㄐ', pinyin: 'ydj' },
+    { code: '2887', name: '台新金', zhuyin: 'ㄊㄒㄐ', pinyin: 'txj' },
+    { code: '2880', name: '華南金', zhuyin: 'ㄏㄋㄐ', pinyin: 'hnj' },
+    { code: '2883', name: '開發金', zhuyin: 'ㄎㄈㄐ', pinyin: 'kfj' },
+    { code: '2890', name: '永豐金', zhuyin: 'ㄩㄈㄐ', pinyin: 'yfj' },
+    { code: '5880', name: '合庫金', zhuyin: 'ㄏㄎㄐ', pinyin: 'hkj' },
+    { code: '2888', name: '新光金', zhuyin: 'ㄒㄍㄐ', pinyin: 'xgj' },
+
+    // 傳產
+    { code: '1101', name: '台泥', zhuyin: 'ㄊㄋ', pinyin: 'tn' },
+    { code: '1102', name: '亞泥', zhuyin: 'ㄧㄋ', pinyin: 'yn' },
+    { code: '1216', name: '統一', zhuyin: 'ㄊㄧ', pinyin: 'ty' },
+    { code: '1301', name: '台塑', zhuyin: 'ㄊㄙ', pinyin: 'ts' },
+    { code: '1303', name: '南亞', zhuyin: 'ㄋㄧ', pinyin: 'ny' },
+    { code: '1326', name: '台化', zhuyin: 'ㄊㄏ', pinyin: 'th' },
+    { code: '2002', name: '中鋼', zhuyin: 'ㄓㄍ', pinyin: 'zg' },
+    { code: '2105', name: '正新', zhuyin: 'ㄓㄒ', pinyin: 'zx' },
+    { code: '1227', name: '佳格', zhuyin: 'ㄐㄍ', pinyin: 'jg' },
+    { code: '1402', name: '遠東新', zhuyin: 'ㄩㄉㄒ', pinyin: 'ydx' },
+    { code: '1605', name: '華新', zhuyin: 'ㄏㄒ', pinyin: 'hx' },
+
+    // 電信 / 電商
+    { code: '2412', name: '中華電', zhuyin: 'ㄓㄏㄉ', pinyin: 'zhd' },
+    { code: '3045', name: '台灣大', zhuyin: 'ㄊㄨㄉ', pinyin: 'twd' },
+    { code: '4904', name: '遠傳', zhuyin: 'ㄩㄔ', pinyin: 'yc' },
+    { code: '8454', name: '富邦媒', zhuyin: 'ㄈㄅㄇ', pinyin: 'fbm' },
+    { code: '2912', name: '統一超', zhuyin: 'ㄊㄧㄔ', pinyin: 'tyc' },
+
+    // 航運 / 觀光
+    { code: '2603', name: '長榮', zhuyin: 'ㄔㄖ', pinyin: 'cr' },
+    { code: '2609', name: '陽明', zhuyin: 'ㄧㄇ', pinyin: 'ym' },
+    { code: '2615', name: '萬海', zhuyin: 'ㄨㄏ', pinyin: 'wh' },
+    { code: '2618', name: '長榮航', zhuyin: 'ㄔㄖㄏ', pinyin: 'crh' },
+    { code: '2610', name: '華航', zhuyin: 'ㄏㄏ', pinyin: 'hh' },
+
+    // 生技 / 醫療
+    { code: '4736', name: '泰博', zhuyin: 'ㄊㄅ', pinyin: 'tb' },
+    { code: '6446', name: '藥華藥', zhuyin: 'ㄧㄠㄏㄧㄠ', pinyin: 'yhy' },
+    { code: '4174', name: '浩鼎', zhuyin: 'ㄏㄉ', pinyin: 'hd' },
+
+    // 其他熱門
+    { code: '2207', name: '和泰車', zhuyin: 'ㄏㄊㄔ', pinyin: 'htc' },
+    { code: '9914', name: '美利達', zhuyin: 'ㄇㄌㄉ', pinyin: 'mld' },
+    { code: '9921', name: '巨大', zhuyin: 'ㄐㄉ', pinyin: 'jd' },
+    { code: '2027', name: '大成鋼', zhuyin: 'ㄉㄔㄍ', pinyin: 'dcg' },
+    { code: '1707', name: '葡萄王', zhuyin: 'ㄆㄊㄨ', pinyin: 'ptw' },
+  ],
+
+  // ----- 美股常見清單 -----
+  US: [
+    // 科技七巨頭
+    { code: 'AAPL', name: 'Apple', alias: '蘋果' },
+    { code: 'MSFT', name: 'Microsoft', alias: '微軟' },
+    { code: 'GOOGL', name: 'Alphabet Class A', alias: '谷歌' },
+    { code: 'GOOG', name: 'Alphabet Class C', alias: '谷歌' },
+    { code: 'AMZN', name: 'Amazon', alias: '亞馬遜' },
+    { code: 'NVDA', name: 'NVIDIA', alias: '輝達/英偉達' },
+    { code: 'META', name: 'Meta Platforms', alias: '臉書' },
+    { code: 'TSLA', name: 'Tesla', alias: '特斯拉' },
+
+    // 大型股
+    { code: 'BRK.B', name: 'Berkshire Hathaway B', alias: '波克夏' },
+    { code: 'V', name: 'Visa', alias: '威士' },
+    { code: 'MA', name: 'Mastercard', alias: '萬事達' },
+    { code: 'JPM', name: 'JPMorgan Chase', alias: '摩根大通' },
+    { code: 'JNJ', name: 'Johnson & Johnson', alias: '嬌生' },
+    { code: 'WMT', name: 'Walmart', alias: '沃爾瑪' },
+    { code: 'PG', name: 'Procter & Gamble', alias: '寶僑' },
+    { code: 'UNH', name: 'UnitedHealth', alias: '聯合健康' },
+    { code: 'HD', name: 'Home Depot', alias: '家得寶' },
+    { code: 'BAC', name: 'Bank of America', alias: '美國銀行' },
+    { code: 'XOM', name: 'Exxon Mobil', alias: '艾克森美孚' },
+    { code: 'PFE', name: 'Pfizer', alias: '輝瑞' },
+    { code: 'KO', name: 'Coca-Cola', alias: '可口可樂' },
+    { code: 'PEP', name: 'PepsiCo', alias: '百事' },
+    { code: 'DIS', name: 'Walt Disney', alias: '迪士尼' },
+    { code: 'NFLX', name: 'Netflix', alias: '網飛' },
+    { code: 'INTC', name: 'Intel', alias: '英特爾' },
+    { code: 'AMD', name: 'Advanced Micro Devices', alias: '超微' },
+    { code: 'CRM', name: 'Salesforce', alias: '賽富時' },
+    { code: 'ORCL', name: 'Oracle', alias: '甲骨文' },
+    { code: 'CSCO', name: 'Cisco Systems', alias: '思科' },
+    { code: 'IBM', name: 'IBM', alias: '國際商業機器' },
+    { code: 'ADBE', name: 'Adobe', alias: '奧多比' },
+    { code: 'PYPL', name: 'PayPal', alias: '貝寶' },
+    { code: 'UBER', name: 'Uber Technologies', alias: '優步' },
+    { code: 'ABNB', name: 'Airbnb', alias: '愛彼迎' },
+    { code: 'SHOP', name: 'Shopify', alias: '購物' },
+    { code: 'SQ', name: 'Block', alias: '區塊' },
+    { code: 'COIN', name: 'Coinbase', alias: '幣安基地' },
+    { code: 'PLTR', name: 'Palantir', alias: '帕蘭提爾' },
+    { code: 'SNOW', name: 'Snowflake', alias: '雪花' },
+    { code: 'AVGO', name: 'Broadcom', alias: '博通' },
+    { code: 'QCOM', name: 'Qualcomm', alias: '高通' },
+    { code: 'TXN', name: 'Texas Instruments', alias: '德州儀器' },
+    { code: 'MU', name: 'Micron Technology', alias: '美光' },
+    { code: 'TSM', name: 'TSMC ADR', alias: '台積電ADR' },
+    { code: 'ASML', name: 'ASML Holding', alias: '艾司摩爾' },
+    { code: 'BABA', name: 'Alibaba', alias: '阿里巴巴' },
+    { code: 'JD', name: 'JD.com', alias: '京東' },
+    { code: 'BIDU', name: 'Baidu', alias: '百度' },
+    { code: 'NIO', name: 'NIO', alias: '蔚來' },
+
+    // ETF
+    { code: 'SPY', name: 'SPDR S&P 500 ETF', alias: '標普500' },
+    { code: 'QQQ', name: 'Invesco QQQ Trust', alias: '那斯達克100' },
+    { code: 'VOO', name: 'Vanguard S&P 500 ETF', alias: '標普500' },
+    { code: 'VTI', name: 'Vanguard Total Stock Market ETF', alias: '美股總體' },
+    { code: 'VT', name: 'Vanguard Total World Stock ETF', alias: '全世界' },
+    { code: 'VYM', name: 'Vanguard High Dividend Yield ETF', alias: '高股息' },
+    { code: 'SCHD', name: 'Schwab US Dividend Equity ETF', alias: '高股息' },
+    { code: 'VGT', name: 'Vanguard Information Technology ETF', alias: '科技' },
+    { code: 'ARKK', name: 'ARK Innovation ETF', alias: '木頭姊' },
+    { code: 'TQQQ', name: 'ProShares UltraPro QQQ', alias: '三倍那斯達克' },
+    { code: 'SOXL', name: 'Direxion Semiconductor Bull 3X', alias: '三倍半導體' },
+    { code: 'TLT', name: 'iShares 20+ Year Treasury Bond', alias: '美國長債' },
+    { code: 'GLD', name: 'SPDR Gold Shares', alias: '黃金' },
+  ],
+
+  // ----- 搜尋功能 -----
+  search(keyword, market = null, limit = 10) {
+    if (!keyword || !keyword.trim()) return [];
+    const kw = keyword.trim().toLowerCase();
+    const results = [];
+    const targets = market ? [{ market, list: this[market] }]
+                           : [{ market: 'TW', list: this.TW }, { market: 'US', list: this.US }];
+
+    targets.forEach(({ market: m, list }) => {
+      list.forEach(item => {
+        let score = 0;
+        const code = item.code.toLowerCase();
+        const name = (item.name || '').toLowerCase();
+        const alias = (item.alias || '').toLowerCase();
+        const pinyin = (item.pinyin || '').toLowerCase();
+        const zhuyin = item.zhuyin || '';
+
+        // 完全相符 → 最高分
+        if (code === kw) score = 1000;
+        // 代號開頭符合
+        else if (code.startsWith(kw)) score = 800;
+        // 代號包含
+        else if (code.includes(kw)) score = 600;
+        // 名稱包含
+        else if (name.includes(kw)) score = 500;
+        // 別名包含
+        else if (alias.includes(kw)) score = 400;
+        // 拼音首字
+        else if (pinyin && pinyin.startsWith(kw)) score = 300;
+        // 注音首字（包含）
+        else if (zhuyin && zhuyin.includes(kw)) score = 200;
+
+        if (score > 0) {
+          results.push({ ...item, market: m, _score: score });
+        }
+      });
+    });
+
+    results.sort((a, b) => b._score - a._score);
+    return results.slice(0, limit);
+  },
+
+  // ----- 取得單一股票 -----
+  get(code, market = null) {
+    if (!code) return null;
+    const upperCode = code.toUpperCase();
+    const targets = market ? [this[market]] : [this.TW, this.US];
+    for (const list of targets) {
+      const found = list.find(item => item.code.toUpperCase() === upperCode);
+      if (found) return found;
+    }
+    return null;
+  },
+
+  // ----- 自動判斷市場 -----
+  detectMarket(code) {
+    if (!code) return null;
+    const c = code.toUpperCase().trim();
+    // 台股：純數字（4-6位數）
+    if (/^\d{4,6}$/.test(c)) return 'TW';
+    // 美股：純英文字母 + 可能有 . 或 -
+    if (/^[A-Z]+([.\-][A-Z]+)?$/.test(c)) return 'US';
+    return null;
+  },
+
+  // ----- 取得名稱（找不到回傳代號） -----
+  getName(code, market = null) {
+    const stock = this.get(code, market);
+    return stock ? stock.name : code;
+  },
+};
+
+// ============================================================
+// 🔍 Autocomplete - 自動完成元件
+// ============================================================
+const Autocomplete = {
+  _instances: new Map(),
+
+  /**
+   * 綁定自動完成到 input
+   * @param {HTMLInputElement} input - 目標輸入框
+   * @param {Object} options - 設定
+   *   - market: 'TW' | 'US' | null（null = 全部）
+   *   - onSelect: (item) => void
+   *   - placeholder: string
+   */
+  attach(input, options = {}) {
+    if (!input) return;
+    if (this._instances.has(input)) {
+      this.detach(input);
+    }
+
+    const opts = {
+      market: options.market || null,
+      onSelect: options.onSelect || (() => {}),
+      limit: options.limit || 8,
+    };
+
+    // 建立下拉清單容器
+    const dropdown = document.createElement('div');
+    dropdown.className = 'autocomplete-dropdown';
+    dropdown.style.cssText = `
+      position: absolute;
+      background: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 8px;
+      max-height: 280px;
+      overflow-y: auto;
+      z-index: 9999;
+      display: none;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      min-width: 200px;
+    `;
+    document.body.appendChild(dropdown);
+
+    let currentIndex = -1;
+    let currentResults = [];
+
+    const updatePosition = () => {
+      const rect = input.getBoundingClientRect();
+      dropdown.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+      dropdown.style.left = (rect.left + window.scrollX) + 'px';
+      dropdown.style.width = Math.max(rect.width, 280) + 'px';
+    };
+
+    const render = (results) => {
+      currentResults = results;
+      currentIndex = -1;
+      if (!results || results.length === 0) {
+        dropdown.style.display = 'none';
+        return;
+      }
+      dropdown.innerHTML = results.map((item, idx) => `
+        <div class="ac-item" data-index="${idx}" style="
+          padding: 10px 14px;
+          cursor: pointer;
+          border-bottom: 1px solid #374151;
+          color: #e5e7eb;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+        ">
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-weight: 600; font-size: 14px;">
+              <span style="color: #60a5fa;">${item.code}</span>
+              <span style="margin-left: 8px;">${item.name}</span>
+            </div>
+            ${item.alias ? `<div style="font-size: 12px; color: #9ca3af; margin-top: 2px;">${item.alias}</div>` : ''}
+          </div>
+          <span style="
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            background: ${item.market === 'TW' ? '#1e40af' : '#7c2d12'};
+            color: white;
+            white-space: nowrap;
+          ">${item.market}</span>
+        </div>
+      `).join('');
+
+      // 綁定點擊
+      dropdown.querySelectorAll('.ac-item').forEach(el => {
+        el.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const idx = parseInt(el.dataset.index, 10);
+          selectItem(idx);
+        });
+        el.addEventListener('mouseenter', () => {
+          highlightItem(parseInt(el.dataset.index, 10));
+        });
+      });
+
+      updatePosition();
+      dropdown.style.display = 'block';
+    };
+
+    const highlightItem = (idx) => {
+      currentIndex = idx;
+      dropdown.querySelectorAll('.ac-item').forEach((el, i) => {
+        el.style.background = (i === idx) ? '#374151' : 'transparent';
+      });
+    };
+
+    const selectItem = (idx) => {
+      const item = currentResults[idx];
+      if (!item) return;
+      input.value = item.code;
+      dropdown.style.display = 'none';
+      opts.onSelect(item);
+    };
+
+    const onInput = () => {
+      const kw = input.value.trim();
+      if (!kw) {
+        dropdown.style.display = 'none';
+        return;
+      }
+      const results = StockDB.search(kw, opts.market, opts.limit);
+      render(results);
+    };
+
+    const onKeyDown = (e) => {
+      if (dropdown.style.display === 'none') return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const next = Math.min(currentIndex + 1, currentResults.length - 1);
+        highlightItem(next);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const prev = Math.max(currentIndex - 1, 0);
+        highlightItem(prev);
+      } else if (e.key === 'Enter') {
+        if (currentIndex >= 0) {
+          e.preventDefault();
+          selectItem(currentIndex);
+        }
+      } else if (e.key === 'Escape') {
+        dropdown.style.display = 'none';
+      }
+    };
+
+    const onBlur = () => {
+      setTimeout(() => { dropdown.style.display = 'none'; }, 150);
+    };
+
+    const onFocus = () => {
+      if (input.value.trim()) onInput();
+    };
+
+    input.addEventListener('input', onInput);
+    input.addEventListener('keydown', onKeyDown);
+    input.addEventListener('blur', onBlur);
+    input.addEventListener('focus', onFocus);
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+
+    // 儲存清理函式
+    this._instances.set(input, () => {
+      input.removeEventListener('input', onInput);
+      input.removeEventListener('keydown', onKeyDown);
+      input.removeEventListener('blur', onBlur);
+      input.removeEventListener('focus', onFocus);
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+      if (dropdown.parentNode) dropdown.parentNode.removeChild(dropdown);
+    });
+  },
+
+  /**
+   * 移除自動完成
+   */
+  detach(input) {
+    const cleanup = this._instances.get(input);
+    if (cleanup) {
+      cleanup();
+      this._instances.delete(input);
+    }
+  },
+};
+
 
 // ============================================================
 // 📋 日誌

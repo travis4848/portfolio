@@ -998,825 +998,866 @@ body {
    📦 投資組合管理系統 - JavaScript Part 1
    模組：CONFIG / Utils / Storage / GistAPI / DataModel / State
    ============================================================ */
-
 'use strict';
 
 /* ============================================================
-   🔧 模組 1：CONFIG - 全域設定
+   📦 Portfolio Manager v2.0.0 - Part 1
+   ============================================================
+   - 配置 / 工具 / 儲存
+   - 雙 Gist 檔案管理
+   - v1→v2 遷移
+   - 每日快照系統
    ============================================================ */
+
+// ============================================================
+// 🔧 全域配置
+// ============================================================
 const CONFIG = {
-    // 應用程式版本
-    VERSION: '1.0.0',
-    
-    // localStorage 鍵名
-    STORAGE_KEYS: {
-        TOKEN: 'portfolio_token',
-        GIST_ID: 'portfolio_gist_id',
-        DATA_CACHE: 'portfolio_data_cache',
-        LAST_SYNC: 'portfolio_last_sync',
-        SETTINGS: 'portfolio_settings'
-    },
-    
-    // GitHub API
-    GITHUB_API: 'https://api.github.com',
-    GIST_FILENAME: 'portfolio.json',
-    
-    // 同步設定
-    SYNC: {
-        AUTO_SYNC_INTERVAL: 1 * 60 * 1000,    // 自動同步間隔：1 分鐘
-        DEBOUNCE_DELAY: 2000,                  // 編輯後延遲同步：2 秒
-        MAX_RETRY: 3,                          // 失敗重試次數
-        TIMEOUT: 15000                         // API 請求逾時：15 秒
-    },
-    
-    // 資料版本（資料結構升級時用）
-    DATA_VERSION: '1.0',
-    
-    // 預設資料模板
-    DEFAULT_DATA: {
-        version: '1.0',
-        lastUpdated: null,
-        stocks: [],
-        futures: [],
-        watchlist: [],
-        settings: {
-            currency: 'TWD',
-            theme: 'dark',
-            autoSync: true
-        }
-    },
-    
-    // Toast 顯示時間
-    TOAST_DURATION: 3000
+  VERSION: '2.0.0',
+  STORAGE_KEYS: {
+    TOKEN: 'portfolio_token',
+    GIST_ID: 'portfolio_gist_id',
+    LOCAL_DATA: 'portfolio_local_data',
+    LOCAL_HISTORY: 'portfolio_local_history',
+    LAST_SYNC: 'portfolio_last_sync'
+  },
+  GIST_FILES: {
+    MAIN: 'portfolio.json',
+    HISTORY: 'history.json'
+  },
+  HISTORY: {
+    DAILY_KEEP_DAYS: 90,      // 90 天內每日記錄
+    WEEKLY_KEEP_DAYS: 365,    // 90~365 天每週記錄
+    // 365 天以上每月記錄
+  },
+  PRICE_FETCH: {
+    INTERVAL: 60000,          // 1 分鐘
+    RETRY_DELAY: 5000,
+    MAX_RETRY: 3
+  },
+  MARKET_HOURS: {
+    TW_OPEN: { hour: 9, minute: 0 },
+    TW_CLOSE: { hour: 13, minute: 30 },
+    TW_FUTURES_OPEN: { hour: 8, minute: 45 },
+    TW_FUTURES_CLOSE: { hour: 13, minute: 45 }
+  }
 };
 
-/* ============================================================
-   🛠️ 模組 2：Utils - 通用工具函式
-   ============================================================ */
+// ============================================================
+// 🛠️ 工具函式
+// ============================================================
 const Utils = {
-    /**
-     * 產生唯一 ID（用於每筆資料的識別）
-     */
-    generateId() {
-        return 'id_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-    },
-    
-    /**
-     * 格式化金額（千分位 + 兩位小數）
-     */
-    formatMoney(num, decimals = 0) {
-        if (num === null || num === undefined || isNaN(num)) return '$0';
-        const sign = num < 0 ? '-' : '';
-        const absNum = Math.abs(num);
-        return sign + '$' + absNum.toLocaleString('en-US', {
-            minimumFractionDigits: decimals,
-            maximumFractionDigits: decimals
-        });
-    },
-    
-    /**
-     * 格式化百分比
-     */
-    formatPercent(num, decimals = 2) {
-        if (num === null || num === undefined || isNaN(num)) return '0.00%';
-        const sign = num > 0 ? '+' : '';
-        return sign + num.toFixed(decimals) + '%';
-    },
-    
-    /**
-     * 格式化數字（千分位）
-     */
-    formatNumber(num, decimals = 2) {
-        if (num === null || num === undefined || isNaN(num)) return '0';
-        return num.toLocaleString('en-US', {
-            minimumFractionDigits: decimals,
-            maximumFractionDigits: decimals
-        });
-    },
-    
-    /**
-     * 格式化時間（例：2026-05-13 17:48）
-     */
-    formatDateTime(isoString) {
-        if (!isoString) return '—';
-        try {
-            const d = new Date(isoString);
-            const pad = n => String(n).padStart(2, '0');
-            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
-                   `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        } catch {
-            return '—';
-        }
-    },
-    
-    /**
-     * 格式化相對時間（例：3 分鐘前）
-     */
-    formatRelativeTime(isoString) {
-        if (!isoString) return '從未同步';
-        const diff = Date.now() - new Date(isoString).getTime();
-        const sec = Math.floor(diff / 1000);
-        const min = Math.floor(sec / 60);
-        const hour = Math.floor(min / 60);
-        const day = Math.floor(hour / 24);
-        
-        if (sec < 10) return '剛剛';
-        if (sec < 60) return `${sec} 秒前`;
-        if (min < 60) return `${min} 分鐘前`;
-        if (hour < 24) return `${hour} 小時前`;
-        if (day < 30) return `${day} 天前`;
-        return Utils.formatDateTime(isoString);
-    },
-    
-    /**
-     * 簡易加密（XOR + Base64）— 不是高強度加密，但比明碼好
-     * 用於 Token 在 localStorage 的偽裝儲存
-     */
-    encrypt(text) {
-        if (!text) return '';
-        const key = 'portfolio_2026_secret_key';
-        let result = '';
-        for (let i = 0; i < text.length; i++) {
-            result += String.fromCharCode(
-                text.charCodeAt(i) ^ key.charCodeAt(i % key.length)
-            );
-        }
-        return btoa(unescape(encodeURIComponent(result)));
-    },
-    
-    decrypt(encoded) {
-        if (!encoded) return '';
-        try {
-            const text = decodeURIComponent(escape(atob(encoded)));
-            const key = 'portfolio_2026_secret_key';
-            let result = '';
-            for (let i = 0; i < text.length; i++) {
-                result += String.fromCharCode(
-                    text.charCodeAt(i) ^ key.charCodeAt(i % key.length)
-                );
-            }
-            return result;
-        } catch {
-            return '';
-        }
-    },
-    
-    /**
-     * 防抖函式 - 連續觸發只執行最後一次
-     */
-    debounce(fn, delay) {
-        let timer = null;
-        return function(...args) {
-            if (timer) clearTimeout(timer);
-            timer = setTimeout(() => fn.apply(this, args), delay);
-        };
-    },
-    
-    /**
-     * 深拷貝物件
-     */
-    deepClone(obj) {
-        return JSON.parse(JSON.stringify(obj));
-    },
-    
-    /**
-     * Sleep 函式（用於重試延遲）
-     */
-    sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    },
-    
-    /**
-     * 安全解析 JSON
-     */
-    safeParseJSON(str, fallback = null) {
-        try {
-            return JSON.parse(str);
-        } catch {
-            return fallback;
-        }
-    },
-    
-    /**
-     * 驗證 GitHub Token 格式
-     */
-    isValidToken(token) {
-        if (!token) return false;
-        // Fine-grained: github_pat_xxx，Classic: ghp_xxx
-        return /^(github_pat_|ghp_|gho_)[A-Za-z0-9_]{20,}$/.test(token);
-    },
-    
-    /**
-     * 驗證 Gist ID 格式（32 位 hex）
-     */
-    isValidGistId(id) {
-        if (!id) return false;
-        return /^[a-f0-9]{20,}$/i.test(id);
+  // 產生唯一 ID
+  uid(prefix = 'id') {
+    return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  },
+
+  // 今日日期 YYYY-MM-DD
+  today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  },
+
+  // 數字格式化
+  fmtNum(n, digits = 0) {
+    if (n === null || n === undefined || isNaN(n)) return '-';
+    return Number(n).toLocaleString('zh-TW', {
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits
+    });
+  },
+
+  // 金額格式化
+  fmtMoney(n, currency = 'TWD') {
+    if (n === null || n === undefined || isNaN(n)) return '-';
+    const symbol = currency === 'TWD' ? 'NT$' : '$';
+    return `${symbol}${this.fmtNum(n, 0)}`;
+  },
+
+  // 百分比
+  fmtPct(n, digits = 2) {
+    if (n === null || n === undefined || isNaN(n)) return '-';
+    return `${Number(n).toFixed(digits)}%`;
+  },
+
+  // 日期時間
+  fmtDateTime(iso) {
+    if (!iso) return '-';
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString('zh-TW', { hour12: false });
+    } catch (e) {
+      return '-';
     }
+  },
+
+  // 兩日期相差天數
+  daysBetween(date1, date2) {
+    const d1 = new Date(date1);
+    const d2 = new Date(date2);
+    return Math.floor((d2 - d1) / (1000 * 60 * 60 * 24));
+  },
+
+  // 深拷貝
+  deepClone(obj) {
+    return JSON.parse(JSON.stringify(obj));
+  },
+
+  // 是否在台股盤中
+  isTwMarketOpen() {
+    const now = new Date();
+    const day = now.getDay();
+    if (day === 0 || day === 6) return false;
+    const h = now.getHours();
+    const m = now.getMinutes();
+    const mins = h * 60 + m;
+    return mins >= (9 * 60) && mins <= (13 * 60 + 30);
+  },
+
+  // 是否在台期盤中
+  isTwFuturesOpen() {
+    const now = new Date();
+    const day = now.getDay();
+    if (day === 0 || day === 6) return false;
+    const h = now.getHours();
+    const m = now.getMinutes();
+    const mins = h * 60 + m;
+    return mins >= (8 * 60 + 45) && mins <= (13 * 60 + 45);
+  },
+
+  // 防抖
+  debounce(fn, wait = 300) {
+    let timer;
+    return function (...args) {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn.apply(this, args), wait);
+    };
+  },
+
+  // HTML escape
+  escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
 };
 
-/* ============================================================
-   💾 模組 3：Storage - 本地儲存管理
-   ============================================================ */
+// ============================================================
+// 📦 資料結構工具 - 預設資料
+// ============================================================
+const DataStructure = {
+  // 預設主資料
+  getDefaultPortfolio() {
+    return {
+      version: CONFIG.VERSION,
+      lastUpdate: new Date().toISOString(),
+      stocks: [],
+      margin: [],
+      futures: [],
+      watchlist: [],
+      settings: {
+        autoFetchPrice: true,
+        fetchInterval: 60000,
+        onlyMarketHours: true,
+        defaultMarginRate: 0.6,
+        defaultInterestRate: 0.06,
+        theme: 'dark',
+        currency: 'TWD',
+        language: 'zh-TW'
+      }
+    };
+  },
+
+  // 預設歷史資料
+  getDefaultHistory() {
+    return {
+      version: CONFIG.VERSION,
+      snapshots: [],
+      transactions: []
+    };
+  },
+
+  // 建立空 stock 物件
+  createStock(symbol, name, market = 'TW') {
+    return {
+      id: Utils.uid('stk'),
+      symbol: symbol,
+      name: name,
+      market: market,
+      industry: '',
+      lots: [],
+      currentPrice: 0,
+      lastPriceUpdate: null,
+      realizedPnl: 0,
+      tRollingProfit: 0
+    };
+  },
+
+  // 建立 lot
+  createStockLot(shares, cost, date = null, fee = 0, note = '') {
+    return {
+      id: Utils.uid('lot'),
+      shares: Number(shares) || 0,
+      cost: Number(cost) || 0,
+      date: date || Utils.today(),
+      fee: Number(fee) || 0,
+      note: note || ''
+    };
+  },
+
+  // 建立融資 lot
+  createMarginLot(shares, cost, marginRate, interestRate, date, fee, note) {
+    const total = shares * cost;
+    const ownFund = total * (1 - marginRate);
+    const marginLoan = total * marginRate;
+    return {
+      id: Utils.uid('lot'),
+      shares: Number(shares) || 0,
+      cost: Number(cost) || 0,
+      date: date || Utils.today(),
+      marginRate: Number(marginRate) || 0.6,
+      ownFund: ownFund,
+      marginLoan: marginLoan,
+      interestRate: Number(interestRate) || 0.06,
+      fee: Number(fee) || 0,
+      note: note || ''
+    };
+  },
+
+  // 建立期貨 lot
+  createFuturesLot(direction, contracts, entryPrice, margin, contractSize, date, fee, note) {
+    return {
+      id: Utils.uid('lot'),
+      direction: direction || 'long',
+      contracts: Number(contracts) || 0,
+      entryPrice: Number(entryPrice) || 0,
+      margin: Number(margin) || 0,
+      contractSize: Number(contractSize) || 200,
+      date: date || Utils.today(),
+      fee: Number(fee) || 0,
+      note: note || ''
+    };
+  },
+
+  // 建立交易紀錄
+  createTransaction(type, category, symbol, name, shares, price, options = {}) {
+    return {
+      id: Utils.uid('tx'),
+      timestamp: new Date().toISOString(),
+      type: type,
+      category: category,
+      symbol: symbol,
+      name: name || '',
+      shares: Number(shares) || 0,
+      price: Number(price) || 0,
+      amount: (Number(shares) || 0) * (Number(price) || 0),
+      fee: Number(options.fee) || 0,
+      tax: Number(options.tax) || 0,
+      realizedPnl: Number(options.realizedPnl) || 0,
+      relatedLotIds: options.relatedLotIds || [],
+      note: options.note || ''
+    };
+  },
+
+  // 建立每日快照
+  createSnapshot(stats) {
+    return {
+      date: Utils.today(),
+      timestamp: new Date().toISOString(),
+      totalAssets: stats.totalAssets || 0,
+      totalCost: stats.totalCost || 0,
+      totalPnl: stats.totalPnl || 0,
+      pnlPct: stats.pnlPct || 0,
+      breakdown: {
+        stocks: stats.breakdown?.stocks || 0,
+        margin: stats.breakdown?.margin || 0,
+        futures: stats.breakdown?.futures || 0,
+        cash: stats.breakdown?.cash || 0
+      },
+      positionsCount: stats.positionsCount || 0,
+      realizedPnlAccum: stats.realizedPnlAccum || 0
+    };
+  }
+};
+
+// ============================================================
+// 🔄 v1 → v2 遷移工具
+// ============================================================
+const Migration = {
+  // 檢查是否為 v1 格式
+  isV1(data) {
+    if (!data) return false;
+    if (data.version === '2.0.0') return false;
+    // v1 通常沒有 version 或為 1.x
+    if (!data.version || data.version.startsWith('1.')) return true;
+    // 或者 stocks 結構是舊的（沒有 lots）
+    if (Array.isArray(data.stocks) && data.stocks.length > 0) {
+      const first = data.stocks[0];
+      if (first && !Array.isArray(first.lots)) return true;
+    }
+    return false;
+  },
+
+  // 執行遷移
+  migrate(oldData) {
+    console.log('[Migration] 開始 v1 → v2 遷移...');
+    const newData = DataStructure.getDefaultPortfolio();
+    
+    try {
+      // 遷移現股
+      if (Array.isArray(oldData.stocks)) {
+        newData.stocks = oldData.stocks.map(s => this.migrateStock(s));
+      }
+      
+      // 遷移期貨
+      if (Array.isArray(oldData.futures)) {
+        newData.futures = oldData.futures.map(f => this.migrateFutures(f));
+      }
+      
+      // 遷移觀察清單
+      if (Array.isArray(oldData.watchlist)) {
+        newData.watchlist = oldData.watchlist.map(w => ({
+          id: w.id || Utils.uid('wl'),
+          symbol: w.symbol || '',
+          name: w.name || '',
+          market: w.market || 'TW',
+          currentPrice: Number(w.currentPrice) || 0,
+          addedDate: w.addedDate || new Date().toISOString(),
+          note: w.note || ''
+        }));
+      }
+      
+      // 遷移設定
+      if (oldData.settings) {
+        Object.assign(newData.settings, oldData.settings);
+      }
+      
+      console.log('[Migration] ✅ 遷移完成');
+      return newData;
+    } catch (err) {
+      console.error('[Migration] ❌ 遷移失敗:', err);
+      throw new Error(`資料遷移失敗：${err.message}`);
+    }
+  },
+
+  // 遷移單一現股
+  migrateStock(old) {
+    const stock = DataStructure.createStock(
+      old.symbol || '',
+      old.name || '',
+      old.market || 'TW'
+    );
+    stock.industry = old.industry || '';
+    stock.currentPrice = Number(old.currentPrice) || 0;
+    stock.lastPriceUpdate = old.lastPriceUpdate || null;
+    stock.realizedPnl = Number(old.realizedPnl) || 0;
+    
+    // 把舊的 shares + avgCost 轉成單一 lot
+    if (old.shares && old.avgCost) {
+      stock.lots.push(DataStructure.createStockLot(
+        old.shares,
+        old.avgCost,
+        old.buyDate || old.date || Utils.today(),
+        old.fee || 0,
+        old.note || ''
+      ));
+    } else if (Array.isArray(old.lots)) {
+      // 已經是新格式（部分升級）
+      stock.lots = old.lots.map(l => ({
+        id: l.id || Utils.uid('lot'),
+        shares: Number(l.shares) || 0,
+        cost: Number(l.cost) || 0,
+        date: l.date || Utils.today(),
+        fee: Number(l.fee) || 0,
+        note: l.note || ''
+      }));
+    }
+    
+    return stock;
+  },
+
+  // 遷移單一期貨
+  migrateFutures(old) {
+    const fut = {
+      id: old.id || Utils.uid('fut'),
+      symbol: old.symbol || '',
+      name: old.name || '',
+      productType: old.productType || 'TXF',
+      lots: [],
+      currentPrice: Number(old.currentPrice) || 0,
+      lastPriceUpdate: old.lastPriceUpdate || null,
+      realizedPnl: Number(old.realizedPnl) || 0
+    };
+    
+    // 舊格式單筆 → 一個 lot
+    if (old.contracts !== undefined && old.entryPrice !== undefined) {
+      fut.lots.push(DataStructure.createFuturesLot(
+        old.direction || 'long',
+        old.contracts,
+        old.entryPrice,
+        old.margin || 0,
+        old.contractSize || 200,
+        old.date || Utils.today(),
+        old.fee || 0,
+        old.note || ''
+      ));
+    } else if (Array.isArray(old.lots)) {
+      fut.lots = old.lots;
+    }
+    
+    return fut;
+  }
+};
+
+// ============================================================
+// 💾 儲存層 - LocalStorage + Gist
+// ============================================================
 const Storage = {
-    /**
-     * 儲存 Token（加密）
-     */
-    saveToken(token) {
-        if (!token) return false;
-        const encrypted = Utils.encrypt(token);
-        localStorage.setItem(CONFIG.STORAGE_KEYS.TOKEN, encrypted);
-        return true;
-    },
-    
-    /**
-     * 讀取 Token（解密）
-     */
-    getToken() {
-        const encrypted = localStorage.getItem(CONFIG.STORAGE_KEYS.TOKEN);
-        if (!encrypted) return null;
-        return Utils.decrypt(encrypted);
-    },
-    
-    /**
-     * 儲存 Gist ID
-     */
-    saveGistId(gistId) {
-        if (!gistId) return false;
-        localStorage.setItem(CONFIG.STORAGE_KEYS.GIST_ID, gistId);
-        return true;
-    },
-    
-    /**
-     * 讀取 Gist ID
-     */
-    getGistId() {
-        return localStorage.getItem(CONFIG.STORAGE_KEYS.GIST_ID);
-    },
-    
-    /**
-     * 檢查是否已完成設定
-     */
-    isConfigured() {
-        return !!(this.getToken() && this.getGistId());
-    },
-    
-    /**
-     * 儲存資料快取（離線時使用）
-     */
-    saveCache(data) {
-        try {
-            const json = JSON.stringify(data);
-            localStorage.setItem(CONFIG.STORAGE_KEYS.DATA_CACHE, json);
-            return true;
-        } catch (e) {
-            console.error('[Storage] 快取儲存失敗', e);
-            return false;
-        }
-    },
-    
-    /**
-     * 讀取資料快取
-     */
-    getCache() {
-        const json = localStorage.getItem(CONFIG.STORAGE_KEYS.DATA_CACHE);
-        if (!json) return null;
-        return Utils.safeParseJSON(json);
-    },
-    
-    /**
-     * 儲存最後同步時間
-     */
-    saveLastSync(time) {
-        localStorage.setItem(CONFIG.STORAGE_KEYS.LAST_SYNC, time || new Date().toISOString());
-    },
-    
-    /**
-     * 讀取最後同步時間
-     */
-    getLastSync() {
-        return localStorage.getItem(CONFIG.STORAGE_KEYS.LAST_SYNC);
-    },
-    
-    /**
-     * 清除所有設定（重設）
-     */
-    clearAll() {
-        Object.values(CONFIG.STORAGE_KEYS).forEach(key => {
-            localStorage.removeItem(key);
-        });
-    },
-    
-    /**
-     * 清除快取（保留設定）
-     */
-    clearCache() {
-        localStorage.removeItem(CONFIG.STORAGE_KEYS.DATA_CACHE);
-        localStorage.removeItem(CONFIG.STORAGE_KEYS.LAST_SYNC);
+  // ---------- LocalStorage ----------
+  saveLocal(data) {
+    try {
+      localStorage.setItem(CONFIG.STORAGE_KEYS.LOCAL_DATA, JSON.stringify(data));
+      return true;
+    } catch (e) {
+      console.error('[Storage] saveLocal 失敗:', e);
+      return false;
     }
+  },
+
+  loadLocal() {
+    try {
+      const raw = localStorage.getItem(CONFIG.STORAGE_KEYS.LOCAL_DATA);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      console.error('[Storage] loadLocal 失敗:', e);
+      return null;
+    }
+  },
+
+  saveLocalHistory(history) {
+    try {
+      localStorage.setItem(CONFIG.STORAGE_KEYS.LOCAL_HISTORY, JSON.stringify(history));
+      return true;
+    } catch (e) {
+      console.error('[Storage] saveLocalHistory 失敗:', e);
+      return false;
+    }
+  },
+
+  loadLocalHistory() {
+    try {
+      const raw = localStorage.getItem(CONFIG.STORAGE_KEYS.LOCAL_HISTORY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      console.error('[Storage] loadLocalHistory 失敗:', e);
+      return null;
+    }
+  },
+
+  getToken() {
+    return localStorage.getItem(CONFIG.STORAGE_KEYS.TOKEN);
+  },
+
+  getGistId() {
+    return localStorage.getItem(CONFIG.STORAGE_KEYS.GIST_ID);
+  },
+
+  setToken(token) {
+    localStorage.setItem(CONFIG.STORAGE_KEYS.TOKEN, token);
+  },
+
+  setGistId(id) {
+    localStorage.setItem(CONFIG.STORAGE_KEYS.GIST_ID, id);
+  },
+
+  setLastSync(iso) {
+    localStorage.setItem(CONFIG.STORAGE_KEYS.LAST_SYNC, iso);
+  },
+
+  getLastSync() {
+    return localStorage.getItem(CONFIG.STORAGE_KEYS.LAST_SYNC);
+  },
+
+  clearAll() {
+    Object.values(CONFIG.STORAGE_KEYS).forEach(k => localStorage.removeItem(k));
+  },
+
+  // ---------- Gist API ----------
+  async gistRequest(method, path = '', body = null) {
+    const token = this.getToken();
+    if (!token) throw new Error('尚未設定 Token');
+    
+    const url = `https://api.github.com${path}`;
+    const opts = {
+      method: method,
+      headers: {
+        'Authorization': `token ${token}`,
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      }
+    };
+    if (body) opts.body = JSON.stringify(body);
+    
+    const res = await fetch(url, opts);
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Gist API ${res.status}: ${txt}`);
+    }
+    return res.json();
+  },
+
+  // 載入 Gist（同時取得主資料 + 歷史）
+  async loadFromGist() {
+    const gistId = this.getGistId();
+    if (!gistId) throw new Error('尚未設定 Gist ID');
+    
+    const gist = await this.gistRequest('GET', `/gists/${gistId}`);
+    const files = gist.files || {};
+    
+    // 主資料
+    let portfolio = null;
+    const mainFile = files[CONFIG.GIST_FILES.MAIN];
+    if (mainFile && mainFile.content) {
+      try {
+        portfolio = JSON.parse(mainFile.content);
+      } catch (e) {
+        console.error('[Storage] 解析 portfolio.json 失敗:', e);
+      }
+    }
+    
+    // 歷史資料
+    let history = null;
+    const histFile = files[CONFIG.GIST_FILES.HISTORY];
+    if (histFile && histFile.content) {
+      try {
+        history = JSON.parse(histFile.content);
+      } catch (e) {
+        console.error('[Storage] 解析 history.json 失敗:', e);
+      }
+    }
+    
+    // 自動遷移
+    if (portfolio && Migration.isV1(portfolio)) {
+      console.log('[Storage] 偵測到 v1 資料，自動升級...');
+      portfolio = Migration.migrate(portfolio);
+      // 升級後立即推回 Gist
+      await this.saveToGist(portfolio, history || DataStructure.getDefaultHistory());
+    }
+    
+    return {
+      portfolio: portfolio || DataStructure.getDefaultPortfolio(),
+      history: history || DataStructure.getDefaultHistory()
+    };
+  },
+
+  // 儲存到 Gist（主資料 + 歷史）
+  async saveToGist(portfolio, history) {
+    const gistId = this.getGistId();
+    if (!gistId) throw new Error('尚未設定 Gist ID');
+    
+    portfolio.lastUpdate = new Date().toISOString();
+    portfolio.version = CONFIG.VERSION;
+    if (history) history.version = CONFIG.VERSION;
+    
+    const files = {};
+    files[CONFIG.GIST_FILES.MAIN] = {
+      content: JSON.stringify(portfolio, null, 2)
+    };
+    if (history) {
+      files[CONFIG.GIST_FILES.HISTORY] = {
+        content: JSON.stringify(history, null, 2)
+      };
+    }
+    
+    await this.gistRequest('PATCH', `/gists/${gistId}`, { files });
+    this.setLastSync(new Date().toISOString());
+    return true;
+  }
 };
 
-/* ============================================================
-   🌐 模組 4：GistAPI - GitHub Gist API 串接
-   ============================================================ */
-const GistAPI = {
-    /**
-     * 取得請求 Headers
-     */
-    getHeaders() {
-        const token = Storage.getToken();
-        return {
-            'Accept': 'application/vnd.github+json',
-            'Authorization': `Bearer ${token}`,
-            'X-GitHub-Api-Version': '2022-11-28',
-            'Content-Type': 'application/json'
-        };
-    },
+// ============================================================
+// 📊 統計計算引擎
+// ============================================================
+const Stats = {
+  // 計算單一 stock 的統計
+  calcStock(stock) {
+    let totalShares = 0;
+    let totalCost = 0;
     
-    /**
-     * 帶逾時的 fetch 包裝
-     */
-    async fetchWithTimeout(url, options = {}, timeout = CONFIG.SYNC.TIMEOUT) {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
-        try {
-            const response = await fetch(url, {
-                ...options,
-                signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            return response;
-        } catch (e) {
-            clearTimeout(timeoutId);
-            if (e.name === 'AbortError') {
-                throw new Error('請求逾時，請檢查網路');
-            }
-            throw e;
-        }
-    },
+    (stock.lots || []).forEach(lot => {
+      totalShares += lot.shares;
+      totalCost += lot.shares * lot.cost + (lot.fee || 0);
+    });
     
-    /**
-     * 測試 Token 是否有效
-     */
-    async testToken(token) {
-        try {
-            const response = await this.fetchWithTimeout(
-                `${CONFIG.GITHUB_API}/user`,
-                {
-                    headers: {
-                        'Accept': 'application/vnd.github+json',
-                        'Authorization': `Bearer ${token}`,
-                        'X-GitHub-Api-Version': '2022-11-28'
-                    }
-                },
-                10000
-            );
-            
-            if (!response.ok) {
-                if (response.status === 401) throw new Error('Token 無效或已過期');
-                throw new Error(`API 錯誤：${response.status}`);
-            }
-            
-            const data = await response.json();
-            return { success: true, username: data.login };
-        } catch (e) {
-            return { success: false, error: e.message };
-        }
-    },
+    const avgCost = totalShares > 0 ? totalCost / totalShares : 0;
+    const marketValue = totalShares * (stock.currentPrice || 0);
+    const unrealizedPnl = marketValue - totalCost;
+    const pnlPct = totalCost > 0 ? (unrealizedPnl / totalCost) * 100 : 0;
     
-    /**
-     * 測試 Gist 是否可存取
-     */
-    async testGist(token, gistId) {
-        try {
-            const response = await this.fetchWithTimeout(
-                `${CONFIG.GITHUB_API}/gists/${gistId}`,
-                {
-                    headers: {
-                        'Accept': 'application/vnd.github+json',
-                        'Authorization': `Bearer ${token}`,
-                        'X-GitHub-Api-Version': '2022-11-28'
-                    }
-                },
-                10000
-            );
-            
-            if (!response.ok) {
-                if (response.status === 404) throw new Error('找不到 Gist，請檢查 Gist ID');
-                if (response.status === 401) throw new Error('Token 無權限存取此 Gist');
-                throw new Error(`API 錯誤：${response.status}`);
-            }
-            
-            const data = await response.json();
-            const hasFile = data.files && data.files[CONFIG.GIST_FILENAME];
-            
-            if (!hasFile) {
-                return { 
-                    success: true, 
-                    needInit: true,
-                    message: `Gist 中沒有 ${CONFIG.GIST_FILENAME}，將會自動建立`
-                };
-            }
-            
-            return { success: true, needInit: false };
-        } catch (e) {
-            return { success: false, error: e.message };
-        }
-    },
+    // 等效成本（扣除滾動 T 獲利）
+    const effectiveCost = totalShares > 0 
+      ? avgCost - ((stock.tRollingProfit || 0) / totalShares)
+      : 0;
     
-    /**
-     * 從 Gist 讀取資料
-     */
-    async load() {
-        const gistId = Storage.getGistId();
-        if (!gistId) throw new Error('未設定 Gist ID');
-        
-        const response = await this.fetchWithTimeout(
-            `${CONFIG.GITHUB_API}/gists/${gistId}`,
-            { headers: this.getHeaders() }
-        );
-        
-        if (!response.ok) {
-            throw new Error(`讀取失敗：HTTP ${response.status}`);
-        }
-        
-        const gist = await response.json();
-        const file = gist.files[CONFIG.GIST_FILENAME];
-        
-        // 如果檔案不存在，回傳預設資料
-        if (!file) {
-            console.warn('[GistAPI] Gist 中沒有 portfolio.json，使用預設資料');
-            return Utils.deepClone(CONFIG.DEFAULT_DATA);
-        }
-        
-        // 解析 JSON
-        const data = Utils.safeParseJSON(file.content);
-        if (!data) {
-            console.warn('[GistAPI] JSON 解析失敗，使用預設資料');
-            return Utils.deepClone(CONFIG.DEFAULT_DATA);
-        }
-        
-        // 確保資料結構完整（向後相容）
-        return this.normalizeData(data);
-    },
+    return {
+      totalShares,
+      totalCost,
+      avgCost,
+      effectiveCost,
+      marketValue,
+      unrealizedPnl,
+      pnlPct,
+      realizedPnl: stock.realizedPnl || 0,
+      tRollingProfit: stock.tRollingProfit || 0
+    };
+  },
+
+  // 計算融資個股
+  calcMargin(margin) {
+    let totalShares = 0;
+    let totalCost = 0;
+    let totalOwnFund = 0;
+    let totalMarginLoan = 0;
+    let totalInterest = 0;
+    const today = new Date();
     
-    /**
-     * 儲存資料到 Gist
-     */
-    async save(data) {
-        const gistId = Storage.getGistId();
-        if (!gistId) throw new Error('未設定 Gist ID');
-        
-        // 更新時間戳
-        const dataToSave = {
-            ...data,
-            lastUpdated: new Date().toISOString(),
-            version: CONFIG.DATA_VERSION
-        };
-        
-        const body = {
-            files: {
-                [CONFIG.GIST_FILENAME]: {
-                    content: JSON.stringify(dataToSave, null, 2)
-                }
-            }
-        };
-        
-        const response = await this.fetchWithTimeout(
-            `${CONFIG.GITHUB_API}/gists/${gistId}`,
-            {
-                method: 'PATCH',
-                headers: this.getHeaders(),
-                body: JSON.stringify(body)
-            }
-        );
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('[GistAPI] 儲存失敗', response.status, errorText);
-            throw new Error(`儲存失敗：HTTP ${response.status}`);
-        }
-        
-        return dataToSave;
-    },
+    (margin.lots || []).forEach(lot => {
+      totalShares += lot.shares;
+      totalCost += lot.shares * lot.cost + (lot.fee || 0);
+      totalOwnFund += lot.ownFund || 0;
+      totalMarginLoan += lot.marginLoan || 0;
+      
+      // 利息累計
+      const days = Utils.daysBetween(lot.date, today);
+      const interest = (lot.marginLoan || 0) * (lot.interestRate || 0) * days / 365;
+      totalInterest += interest;
+    });
     
-    /**
-     * 帶重試的儲存
-     */
-    async saveWithRetry(data, maxRetry = CONFIG.SYNC.MAX_RETRY) {
-        let lastError;
-        for (let i = 0; i < maxRetry; i++) {
-            try {
-                return await this.save(data);
-            } catch (e) {
-                lastError = e;
-                console.warn(`[GistAPI] 儲存失敗，重試 ${i + 1}/${maxRetry}`, e.message);
-                if (i < maxRetry - 1) {
-                    await Utils.sleep(1000 * (i + 1)); // 漸進延遲
-                }
-            }
-        }
-        throw lastError;
-    },
+    const avgCost = totalShares > 0 ? totalCost / totalShares : 0;
+    const marketValue = totalShares * (margin.currentPrice || 0);
+    const unrealizedPnl = marketValue - totalCost - totalInterest;
+    const pnlPct = totalOwnFund > 0 ? (unrealizedPnl / totalOwnFund) * 100 : 0;
     
-    /**
-     * 標準化資料結構（補齊缺少的欄位）
-     */
-    normalizeData(data) {
-        const normalized = Utils.deepClone(CONFIG.DEFAULT_DATA);
-        if (!data) return normalized;
-        
-        return {
-            version: data.version || CONFIG.DATA_VERSION,
-            lastUpdated: data.lastUpdated || null,
-            stocks: Array.isArray(data.stocks) ? data.stocks : [],
-            futures: Array.isArray(data.futures) ? data.futures : [],
-            watchlist: Array.isArray(data.watchlist) ? data.watchlist : [],
-            settings: { ...normalized.settings, ...(data.settings || {}) }
-        };
-    }
+    // 維持率
+    const maintainRatio = totalMarginLoan > 0 ? (marketValue / totalMarginLoan) * 100 : 0;
+    
+    // 風險等級
+    let riskLevel = 'safe';
+    if (maintainRatio < 130) riskLevel = 'danger';
+    else if (maintainRatio < 166) riskLevel = 'warning';
+    
+    return {
+      totalShares,
+      totalCost,
+      avgCost,
+      totalOwnFund,
+      totalMarginLoan,
+      totalInterest,
+      marketValue,
+      unrealizedPnl,
+      pnlPct,
+      maintainRatio,
+      riskLevel,
+      realizedPnl: margin.realizedPnl || 0,
+      tRollingProfit: margin.tRollingProfit || 0
+    };
+  },
+
+  // 計算期貨
+  calcFutures(fut) {
+    let totalContracts = 0;
+    let totalMargin = 0;
+    let weightedEntry = 0;
+    let unrealizedPnl = 0;
+    let direction = null;
+    
+    (fut.lots || []).forEach(lot => {
+      totalContracts += lot.contracts;
+      totalMargin += lot.margin || 0;
+      weightedEntry += lot.entryPrice * lot.contracts;
+      direction = lot.direction;
+      
+      const dir = lot.direction === 'long' ? 1 : -1;
+      const points = (fut.currentPrice - lot.entryPrice) * dir;
+      unrealizedPnl += points * lot.contracts * (lot.contractSize || 200);
+    });
+    
+    const avgEntry = totalContracts > 0 ? weightedEntry / totalContracts : 0;
+    const pnlPct = totalMargin > 0 ? (unrealizedPnl / totalMargin) * 100 : 0;
+    
+    return {
+      totalContracts,
+      totalMargin,
+      avgEntry,
+      direction,
+      unrealizedPnl,
+      pnlPct,
+      realizedPnl: fut.realizedPnl || 0
+    };
+  },
+
+  // 計算總資產
+  calcTotal(portfolio) {
+    let stocksValue = 0, stocksCost = 0, stocksPnl = 0;
+    let marginValue = 0, marginOwnFund = 0, marginPnl = 0, marginLoan = 0;
+    let futuresPnl = 0, futuresMargin = 0;
+    let positions = 0;
+    
+    (portfolio.stocks || []).forEach(s => {
+      const c = this.calcStock(s);
+      if (c.totalShares > 0) {
+        stocksValue += c.marketValue;
+        stocksCost += c.totalCost;
+        stocksPnl += c.unrealizedPnl;
+        positions++;
+      }
+    });
+    
+    (portfolio.margin || []).forEach(m => {
+      const c = this.calcMargin(m);
+      if (c.totalShares > 0) {
+        marginValue += c.marketValue;
+        marginOwnFund += c.totalOwnFund;
+        marginLoan += c.totalMarginLoan;
+        marginPnl += c.unrealizedPnl;
+        positions++;
+      }
+    });
+    
+    (portfolio.futures || []).forEach(f => {
+      const c = this.calcFutures(f);
+      if (c.totalContracts > 0) {
+        futuresMargin += c.totalMargin;
+        futuresPnl += c.unrealizedPnl;
+        positions++;
+      }
+    });
+    
+    // 自有資金總計（現股全部 + 融資自備款 + 期貨保證金）
+    const totalOwnFund = stocksCost + marginOwnFund + futuresMargin;
+    // 總資產（市值角度）
+    const totalAssets = stocksValue + (marginValue - marginLoan) + futuresMargin + futuresPnl;
+    const totalPnl = stocksPnl + marginPnl + futuresPnl;
+    const totalCost = stocksCost + marginOwnFund + futuresMargin;
+    const pnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
+    
+    return {
+      totalAssets,
+      totalCost,
+      totalPnl,
+      pnlPct,
+      positions,
+      breakdown: {
+        stocks: stocksValue,
+        margin: marginValue - marginLoan,
+        futures: futuresMargin + futuresPnl,
+        cash: 0
+      },
+      detail: {
+        stocksValue, stocksCost, stocksPnl,
+        marginValue, marginOwnFund, marginLoan, marginPnl,
+        futuresMargin, futuresPnl
+      }
+    };
+  }
 };
 
-/* ============================================================
-   📋 模組 5：DataModel - 資料模型
-   ============================================================ */
-const DataModel = {
-    /**
-     * 建立持股紀錄
-     * @param {Object} input - 使用者輸入
-     */
-    createStock(input) {
-        return {
-            id: Utils.generateId(),
-            symbol: (input.symbol || '').trim().toUpperCase(),  // 股票代號
-            name: (input.name || '').trim(),                    // 股票名稱
-            shares: Number(input.shares) || 0,                  // 持有股數
-            avgCost: Number(input.avgCost) || 0,                // 平均成本
-            currentPrice: Number(input.currentPrice) || 0,      // 目前股價（手動輸入）
-            market: input.market || 'TW',                       // 市場：TW / US / HK
-            note: (input.note || '').trim(),                    // 備註
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-        };
-    },
+// ============================================================
+// 📅 每日快照系統
+// ============================================================
+const SnapshotManager = {
+  // 取得今日快照（若存在）
+  getTodaySnapshot(history) {
+    if (!history || !Array.isArray(history.snapshots)) return null;
+    const today = Utils.today();
+    return history.snapshots.find(s => s.date === today) || null;
+  },
+
+  // 建立或更新今日快照
+  recordToday(portfolio, history) {
+    if (!history) history = DataStructure.getDefaultHistory();
+    if (!Array.isArray(history.snapshots)) history.snapshots = [];
     
-    /**
-     * 建立期貨部位
-     */
-    createFutures(input) {
-        return {
-            id: Utils.generateId(),
-            symbol: (input.symbol || '').trim().toUpperCase(),  // 期貨代號（TX, MTX）
-            name: (input.name || '').trim(),                    // 名稱
-            direction: input.direction || 'long',               // long 多 / short 空
-            contracts: Number(input.contracts) || 0,            // 口數
-            entryPrice: Number(input.entryPrice) || 0,          // 進場點位
-            currentPrice: Number(input.currentPrice) || 0,      // 目前點位
-            pointValue: Number(input.pointValue) || 200,        // 每點價值（大台 200, 小台 50）
-            note: (input.note || '').trim(),
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString()
-        };
-    },
+    const stats = Stats.calcTotal(portfolio);
+    const realizedAccum = (history.transactions || [])
+      .reduce((sum, tx) => sum + (tx.realizedPnl || 0), 0);
     
-    /**
-     * 建立觀察清單項目
-     */
-    createWatchlist(input) {
-        return {
-            id: Utils.generateId(),
-            symbol: (input.symbol || '').trim().toUpperCase(),
-            name: (input.name || '').trim(),
-            targetPrice: Number(input.targetPrice) || 0,        // 目標價
-            currentPrice: Number(input.currentPrice) || 0,      // 目前價
-            market: input.market || 'TW',
-            note: (input.note || '').trim(),
-            createdAt: new Date().toISOString()
-        };
-    },
+    const snapshot = DataStructure.createSnapshot({
+      ...stats,
+      realizedPnlAccum: realizedAccum
+    });
     
-    /**
-     * 計算持股的損益
-     */
-    calcStockPnl(stock) {
-        const cost = stock.avgCost * stock.shares;
-        const value = stock.currentPrice * stock.shares;
-        const pnl = value - cost;
-        const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
-        return { cost, value, pnl, pnlPct };
-    },
+    // 移除今日舊快照（同日只保留最新）
+    history.snapshots = history.snapshots.filter(s => s.date !== snapshot.date);
+    history.snapshots.push(snapshot);
+    history.snapshots.sort((a, b) => a.date.localeCompare(b.date));
     
-    /**
-     * 計算期貨的損益
-     */
-    calcFuturesPnl(futures) {
-        const direction = futures.direction === 'long' ? 1 : -1;
-        const points = (futures.currentPrice - futures.entryPrice) * direction;
-        const pnl = points * futures.pointValue * futures.contracts;
-        const cost = futures.entryPrice * futures.pointValue * futures.contracts;
-        const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
-        return { points, pnl, pnlPct, cost };
-    },
+    // 智慧清理（90 天日記、365 天週記、永久月記）
+    this.compactSnapshots(history);
     
-    /**
-     * 計算觀察清單的差距
-     */
-    calcWatchDiff(item) {
-        if (!item.targetPrice || !item.currentPrice) {
-            return { diff: 0, diffPct: 0 };
+    return snapshot;
+  },
+
+  // 智慧壓縮歷史
+  compactSnapshots(history) {
+    if (!history.snapshots || history.snapshots.length === 0) return;
+    
+    const today = new Date();
+    const keep = [];
+    const seenWeeks = new Set();
+    const seenMonths = new Set();
+    
+    // 反向（從新到舊）處理
+    const sorted = [...history.snapshots].sort((a, b) => b.date.localeCompare(a.date));
+    
+    sorted.forEach(snap => {
+      const days = Utils.daysBetween(snap.date, today);
+      
+      if (days <= CONFIG.HISTORY.DAILY_KEEP_DAYS) {
+        keep.push(snap);
+      } else if (days <= CONFIG.HISTORY.WEEKLY_KEEP_DAYS) {
+        const d = new Date(snap.date);
+        const wk = `${d.getFullYear()}-W${Math.floor((d.getDate() - 1) / 7)}`;
+        if (!seenWeeks.has(wk)) {
+          seenWeeks.add(wk);
+          keep.push(snap);
         }
-        const diff = item.currentPrice - item.targetPrice;
-        const diffPct = (diff / item.targetPrice) * 100;
-        return { diff, diffPct };
-    },
+      } else {
+        const ym = snap.date.substring(0, 7);
+        if (!seenMonths.has(ym)) {
+          seenMonths.add(ym);
+          keep.push(snap);
+        }
+      }
+    });
     
-    /**
-     * 計算總覽資料
-     */
-    calcOverview(data) {
-        let totalCost = 0;
-        let totalValue = 0;
-        let totalPnl = 0;
-        
-        // 持股
-        (data.stocks || []).forEach(stock => {
-            const r = this.calcStockPnl(stock);
-            totalCost += r.cost;
-            totalValue += r.value;
-            totalPnl += r.pnl;
-        });
-        
-        // 期貨
-        (data.futures || []).forEach(f => {
-            const r = this.calcFuturesPnl(f);
-            totalPnl += r.pnl;
-        });
-        
-        const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
-        
-        return {
-            totalAssets: totalValue,
-            totalCost,
-            totalPnl,
-            totalPnlPct,
-            stockCount: (data.stocks || []).length,
-            futuresCount: (data.futures || []).reduce((sum, f) => sum + (f.contracts || 0), 0),
-            watchCount: (data.watchlist || []).length
-        };
-    }
+    history.snapshots = keep.sort((a, b) => a.date.localeCompare(b.date));
+  },
+
+  // 取得區間快照
+  getRange(history, days) {
+    if (!history || !Array.isArray(history.snapshots)) return [];
+    if (days === 'all') return [...history.snapshots];
+    
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, '0')}-${String(cutoff.getDate()).padStart(2, '0')}`;
+    
+    return history.snapshots.filter(s => s.date >= cutoffStr);
+  }
 };
 
-/* ============================================================
-   🎯 模組 6：State - 全域狀態管理
-   ============================================================ */
-const State = {
-    // 主要資料
-    data: Utils.deepClone(CONFIG.DEFAULT_DATA),
-    
-    // UI 狀態
-    activeTab: 'stocks',
-    syncStatus: 'idle',          // idle / syncing / synced / error
-    isLoading: false,
-    
-    // 同步狀態
-    lastSyncTime: null,
-    pendingSync: false,
-    autoSyncTimer: null,
-    
-    // 監聽器（觀察者模式）
-    listeners: [],
-    
-    /**
-     * 訂閱狀態變更
-     */
-    subscribe(callback) {
-        this.listeners.push(callback);
-        return () => {
-            this.listeners = this.listeners.filter(l => l !== callback);
-        };
-    },
-    
-    /**
-     * 通知所有監聽器
-     */
-    notify(event, payload) {
-        this.listeners.forEach(cb => {
-            try {
-                cb(event, payload);
-            } catch (e) {
-                console.error('[State] 監聽器錯誤', e);
-            }
-        });
-    },
-    
-    /**
-     * 設定資料
-     */
-    setData(data) {
-        this.data = data;
-        Storage.saveCache(data);
-        this.notify('data:changed', data);
-    },
-    
-    /**
-     * 設定同步狀態
-     */
-    setSyncStatus(status) {
-        this.syncStatus = status;
-        this.notify('sync:status', status);
-    },
-    
-    /**
-     * 新增持股
-     */
-    addStock(stock) {
-        this.data.stocks.push(stock);
-        this.setData(this.data);
-        this.notify('stock:added', stock);
-    },
-    
-    /**
-     * 更新持股
-     */
-    updateStock(id, updates) {
-        const idx = this.data.stocks.findIndex(s => s.id === id);
-        if (idx === -1) return false;
-        this.data.stocks[idx] = {
-            ...this.data.stocks[idx],
-            ...updates,
-            updatedAt: new Date().toISOString()
-        };
-        this.setData(this.data);
-        this.notify('stock:updated', this.data.stocks[idx]);
-        return true;
-    },
-    
-    /**
-     * 刪除持股
-     */
-    deleteStock(id) {
-        this.data.stocks = this.data.stocks.filter(s => s.id !== id);
-        this.setData(this.data);
-        this.notify('stock:deleted', id);
-    },
-    
-    /**
-     * 新增期貨
-     */
-    addFutures(futures) {
-        this.data.futures.push(futures);
-        this.setData(this.data);
-        this.notify('futures:added', futures);
-    },
-    
-    updateFutures(id, updates) {
-        const idx = this.data.futures.findIndex(f => f.id === id);
-        if (idx === -1) return false;
-        this.data.futures[idx] = {
-            ...this.data.futures[idx],
-            ...updates,
-            updatedAt: new Date().toISOString()
-        };
-        this.setData(this.data);
-        this.notify('futures:updated', this.data.futures[idx]);
-        return true;
-    },
-    
-    deleteFutures(id) {
-        this.data.futures = this.data.futures.filter(f => f.id !== id);
-        this.setData(this.data);
-        this.notify('futures:deleted', id);
-    },
-    
-    /**
-     * 新增觀察清單
-     */
-    addWatchlist(item) {
-        this.data.watchlist.push(item);
-        this.setData(this.data);
-        this.notify('watch:added', item);
-    },
-    
-    updateWatchlist(id, updates) {
-        const idx = this.data.watchlist.findIndex(w => w.id === id);
-        if (idx === -1) return false;
-        this.data.watchlist[idx] = { ...this.data.watchlist[idx], ...updates };
-        this.setData(this.data);
-        this.notify('watch:updated', this.data.watchlist[idx]);
-        return true;
-    },
-    
-    deleteWatchlist(id) {
-        this.data.watchlist = this.data.watchlist.filter(w => w.id !== id);
-        this.setData(this.data);
-        this.notify('watch:deleted', id);
-    }
-};
+// ============================================================
+// 📋 日誌
+// ============================================================
+console.log('[Portfolio v2.0.0] Part 1 已載入：CONFIG / Utils / DataStructure / Migration / Storage / Stats / Snapshot');
 
-/* ============================================================
-   ⚠️ Part 1 結束 - 等待 Part 2
-   ============================================================ */
-console.log('[Portfolio] Part 1 已載入，等待 Part 2...');
 
 /* ============================================================
    📦 投資組合管理系統 - JavaScript Part 2

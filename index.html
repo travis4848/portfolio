@@ -4246,8 +4246,217 @@ console.log('✅ TradeFormModal 已載入');
 TradeStore.open().catch(err => console.error('TradeStore 開啟失敗:', err));
 
 
+// ============================================================
+// 🚀 AppController - 應用程式啟動流程
+// ============================================================
+const AppController = (() => {
+  
+  // ─────────────────────────────────────
+  // 🎬 啟動流程
+  // ─────────────────────────────────────
+  async function init() {
+    console.log('[AppController] 啟動中...');
+    
+    try {
+      // 1. 檢查是否已設定 Token / GistId
+      const token = Storage.getToken();
+      const gistId = Storage.getGistId();
+      
+      if (!token || !gistId) {
+        // 顯示設定畫面
+        showSetupScreen();
+      } else {
+        // 顯示主畫面
+        showMainApp();
+      }
+      
+      // 2. 綁定 Tab 切換事件
+      bindTabEvents();
+      
+      // 3. 綁定 Setup 表單事件
+      bindSetupEvents();
+      
+      // 4. 綁定設定分頁事件
+      bindSettingsEvents();
+      
+      // 5. 載入並顯示資料
+      await loadAndRenderData();
+      
+      // 6. 隱藏 loading
+      hideLoading();
+      
+      console.log('[AppController] ✅ 啟動完成');
+    } catch (err) {
+      console.error('[AppController] ❌ 啟動失敗:', err);
+      hideLoading();
+      alert('啟動失敗：' + err.message);
+    }
+  }
+  
+  // ─────────────────────────────────────
+  // 🎭 畫面切換
+  // ─────────────────────────────────────
+  function hideLoading() {
+    const $loading = document.getElementById('loadingOverlay');
+    if ($loading) $loading.classList.add('hidden');
+  }
+  
+  function showSetupScreen() {
+    document.getElementById('setupScreen').classList.add('active');
+    document.getElementById('appContainer').classList.remove('active');
+  }
+  
+  function showMainApp() {
+    document.getElementById('setupScreen').classList.remove('active');
+    document.getElementById('appContainer').classList.add('active');
+  }
+  
+  // ─────────────────────────────────────
+  // 🎚️ Tab 切換
+  // ─────────────────────────────────────
+  function bindTabEvents() {
+    const $tabBtns = document.querySelectorAll('.tab-btn');
+    const $tabContents = document.querySelectorAll('.tab-content');
+    
+    $tabBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const target = btn.dataset.tab;
+        
+        // 切換按鈕
+        $tabBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        // 切換內容
+        $tabContents.forEach(c => c.classList.remove('active'));
+        const $content = document.getElementById(`tab-${target}`);
+        if ($content) $content.classList.add('active');
+      });
+    });
+  }
+  
+  // ─────────────────────────────────────
+  // 🎯 Setup 表單
+  // ─────────────────────────────────────
+  function bindSetupEvents() {
+    const $btn = document.getElementById('setupSaveBtn');
+    if (!$btn) return;
+    
+    $btn.addEventListener('click', () => {
+      const token = document.getElementById('setupToken').value.trim();
+      const gistId = document.getElementById('setupGistId').value.trim();
+      
+      if (!token || !gistId) {
+        alert('請填寫 Token 和 Gist ID');
+        return;
+      }
+      
+      Storage.setToken(token);
+      Storage.setGistId(gistId);
+      
+      showMainApp();
+      loadAndRenderData();
+    });
+  }
+  
+  // ─────────────────────────────────────
+  // ⚙️ 設定分頁
+  // ─────────────────────────────────────
+  function bindSettingsEvents() {
+    // 顯示已存的 Token / GistId
+    const $token = document.getElementById('settingsToken');
+    const $gistId = document.getElementById('settingsGistId');
+    if ($token) $token.value = Storage.getToken() || '';
+    if ($gistId) $gistId.value = Storage.getGistId() || '';
+    
+    // 重設按鈕
+    const $reset = document.getElementById('resetBtn');
+    if ($reset) {
+      $reset.addEventListener('click', () => {
+        if (confirm('確定要清除所有設定嗎？（交易紀錄不會刪除）')) {
+          Storage.clearAll();
+          location.reload();
+        }
+      });
+    }
+    
+    // 手動同步、匯出、匯入（之後實作）
+    // 暫時顯示提示訊息
+    ['manualSyncBtn', 'exportBtn', 'importBtn'].forEach(id => {
+      const $btn = document.getElementById(id);
+      if ($btn) {
+        $btn.addEventListener('click', () => {
+          alert('此功能將於下一階段實作 🚧');
+        });
+      }
+    });
+  }
+  
+  // ─────────────────────────────────────
+  // 📊 載入並渲染資料
+  // ─────────────────────────────────────
+  async function loadAndRenderData() {
+    // 刷新交易列表（已有的函式）
+    if (typeof refreshTradeList === 'function') {
+      await refreshTradeList();
+    }
+    
+    // 更新總覽卡片
+    await updateOverviewCards();
+  }
+  
+  // ─────────────────────────────────────
+  // 📈 更新總覽卡片
+  // ─────────────────────────────────────
+  async function updateOverviewCards() {
+    try {
+      const positions = await TradeStore.calculatePositions();
+      const activePositions = positions.filter(p => p.shares > 0);
+      
+      // 持股檔數
+      const $stockCount = document.getElementById('stockCount');
+      if ($stockCount) $stockCount.textContent = activePositions.length;
+      
+      // 已實現損益總和
+      const totalRealized = positions.reduce((sum, p) => sum + (p.realizedPnL || 0), 0);
+      const $totalPnl = document.getElementById('totalPnl');
+      const $totalPnlPct = document.getElementById('totalPnlPct');
+      if ($totalPnl) {
+        $totalPnl.textContent = formatTwd(totalRealized);
+        $totalPnl.className = 'overview-value ' + 
+          (totalRealized > 0 ? 'text-up' : totalRealized < 0 ? 'text-down' : '');
+      }
+      if ($totalPnlPct) $totalPnlPct.textContent = '已實現';
+      
+      // 總成本（暫時當總資產）
+      const totalCost = activePositions.reduce((sum, p) => sum + p.totalCost, 0);
+      const $totalAssets = document.getElementById('totalAssets');
+      if ($totalAssets) $totalAssets.textContent = formatTwd(totalCost);
+      
+    } catch (err) {
+      console.warn('更新總覽卡片失敗', err);
+    }
+  }
+  
+  function formatTwd(num) {
+    const sign = num < 0 ? '-' : '';
+    return sign + 'NT$' + Math.abs(Math.round(num)).toLocaleString();
+  }
+  
+  return { init, loadAndRenderData, updateOverviewCards };
+})();
+
+// ─────────────────────────────────────
+// 🎬 全域啟動（DOMContentLoaded 已被前面的監聽器用了，這裡用 load）
+// ─────────────────────────────────────
+window.addEventListener('load', () => {
+  AppController.init();
+});
+
+window.AppController = AppController;
+console.log('✅ AppController 已載入');
 
 </script>
+
 
 </body>
 </html>

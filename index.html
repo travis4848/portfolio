@@ -835,6 +835,426 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--accent-primary);
 }
+
+/* ============================================================
+   🎨 Phase 1-5: TradeFormModal 樣式
+   ============================================================ */
+
+/* ── 主畫面新增交易大按鈕 ── */
+.add-trade-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 32px;
+  font-size: 18px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
+  transition: all 0.2s ease;
+}
+.add-trade-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.6);
+}
+.add-trade-btn:active {
+  transform: translateY(0);
+}
+
+/* ── Modal 遮罩 ── */
+.tf-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: tfFadeIn 0.2s ease;
+}
+.tf-modal-overlay.active { display: flex; }
+
+@keyframes tfFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Modal 主體 ── */
+.tf-modal {
+  background: #1a1f2e;
+  border: 1px solid #2d3548;
+  border-radius: 16px;
+  width: 95%;
+  max-width: 560px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: tfSlideUp 0.25s ease;
+}
+@keyframes tfSlideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+/* ── Modal 標題列 ── */
+.tf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid #2d3548;
+}
+.tf-header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #e5e7eb;
+}
+.tf-close-btn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+.tf-close-btn:hover { color: #fff; background: #2d3548; }
+
+/* ── BUY/SELL Tabs ── */
+.tf-tabs {
+  display: flex;
+  padding: 16px 24px 0;
+  gap: 8px;
+}
+.tf-tab {
+  flex: 1;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #9ca3af;
+  background: #232a3d;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tf-tab:hover { background: #2d3548; color: #d1d5db; }
+.tf-tab.active.buy {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: #22c55e;
+  color: #22c55e;
+}
+.tf-tab.active.sell {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* ── 表單內容區 ── */
+.tf-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+.tf-field {
+  margin-bottom: 16px;
+}
+.tf-label {
+  display: block;
+  font-size: 13px;
+  color: #9ca3af;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.tf-label .required { color: #ef4444; }
+.tf-input,
+.tf-select,
+.tf-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: #e5e7eb;
+  background: #232a3d;
+  border: 1px solid #2d3548;
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.15s;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+.tf-input:focus,
+.tf-select:focus,
+.tf-textarea:focus {
+  border-color: #3b82f6;
+}
+.tf-textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+.tf-input.error,
+.tf-select.error {
+  border-color: #ef4444;
+}
+.tf-error-text {
+  display: none;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #ef4444;
+}
+.tf-error-text.show { display: block; }
+.tf-hint-text {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.tf-hint-text.warn { color: #fbbf24; }
+.tf-hint-text.ok   { color: #22c55e; }
+
+/* ── 雙欄佈局 ── */
+.tf-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* ── 進階選項摺疊 ── */
+.tf-advanced {
+  margin-top: 8px;
+  background: #181d2a;
+  border: 1px solid #2d3548;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.tf-advanced-toggle {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: #9ca3af;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tf-advanced-toggle:hover { color: #d1d5db; }
+.tf-advanced-toggle .arrow {
+  transition: transform 0.2s;
+}
+.tf-advanced.open .tf-advanced-toggle .arrow {
+  transform: rotate(180deg);
+}
+.tf-advanced-content {
+  display: none;
+  padding: 14px;
+  border-top: 1px solid #2d3548;
+}
+.tf-advanced.open .tf-advanced-content {
+  display: block;
+}
+
+/* ── 自訂 Checkbox ── */
+.tf-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  cursor: pointer;
+  user-select: none;
+}
+.tf-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: #3b82f6;
+}
+.tf-checkbox span {
+  font-size: 13px;
+  color: #d1d5db;
+}
+.tf-checkbox .desc {
+  font-size: 12px;
+  color: #6b7280;
+  margin-left: 4px;
+}
+
+/* ── 即時試算（浮動底部） ── */
+.tf-calc-summary {
+  padding: 14px 24px;
+  background: linear-gradient(180deg, #1f2535 0%, #181d2a 100%);
+  border-top: 1px solid #2d3548;
+}
+.tf-calc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  margin: 4px 0;
+}
+.tf-calc-row .label { color: #9ca3af; }
+.tf-calc-row .value {
+  color: #e5e7eb;
+  font-family: 'SF Mono', Consolas, monospace;
+}
+.tf-calc-divider {
+  height: 1px;
+  background: #2d3548;
+  margin: 8px 0;
+}
+.tf-calc-row.total {
+  font-size: 15px;
+  font-weight: 700;
+}
+.tf-calc-row.total .label { color: #d1d5db; }
+.tf-calc-row.total .value.buy  { color: #3b82f6; }
+.tf-calc-row.total .value.sell { color: #22c55e; }
+
+/* ── Modal 底部按鈕 ── */
+.tf-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 24px;
+  border-top: 1px solid #2d3548;
+  background: #161a25;
+}
+.tf-footer .keep-open {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #9ca3af;
+  cursor: pointer;
+  user-select: none;
+  margin-right: auto;
+}
+.tf-btn {
+  padding: 10px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.tf-btn-cancel {
+  background: #232a3d;
+  color: #d1d5db;
+}
+.tf-btn-cancel:hover { background: #2d3548; }
+.tf-btn-submit {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #fff;
+}
+.tf-btn-submit:hover {
+  background: linear-gradient(135deg, #4f8eef, #3568d8);
+}
+.tf-btn-submit.sell {
+  background: linear-gradient(135deg, #22c55e, #16a34a);
+}
+.tf-btn-submit.sell:hover {
+  background: linear-gradient(135deg, #2dd370, #1cb651);
+}
+.tf-btn-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Toast 提示訊息 ── */
+.tf-toast {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  padding: 12px 20px;
+  background: #1a1f2e;
+  border: 1px solid #2d3548;
+  border-left: 4px solid #22c55e;
+  border-radius: 8px;
+  color: #e5e7eb;
+  font-size: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 10000;
+  animation: tfToastIn 0.3s ease;
+}
+.tf-toast.error { border-left-color: #ef4444; }
+.tf-toast.fade-out {
+  animation: tfToastOut 0.3s ease forwards;
+}
+@keyframes tfToastIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+@keyframes tfToastOut {
+  to { transform: translateX(100%); opacity: 0; }
+}
+
+/* ── 簡易交易列表（佔位用） ── */
+.trade-list-section {
+  margin-top: 32px;
+  padding: 20px;
+  background: #1a1f2e;
+  border: 1px solid #2d3548;
+  border-radius: 12px;
+}
+.trade-list-section h3 {
+  margin: 0 0 16px;
+  color: #e5e7eb;
+  font-size: 16px;
+}
+.trade-list-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 14px;
+}
+.trade-item {
+  display: grid;
+  grid-template-columns: 80px 1fr auto auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid #2d3548;
+  font-size: 13px;
+}
+.trade-item:last-child { border-bottom: none; }
+.trade-item .date { color: #9ca3af; font-family: monospace; }
+.trade-item .stock { color: #e5e7eb; }
+.trade-item .stock .code { font-weight: 600; margin-right: 6px; }
+.trade-item .stock .name { color: #9ca3af; font-size: 12px; }
+.trade-item .type {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.trade-item .type.BUY  { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+.trade-item .type.SELL { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+.trade-item .amount { font-family: monospace; color: #d1d5db; }
+.trade-item .delete-btn {
+  background: transparent;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.trade-item .delete-btn:hover { color: #ef4444; background: #2d3548; }
+
+/* 響應式 */
+@media (max-width: 600px) {
+  .tf-modal { width: 100%; max-height: 100vh; border-radius: 0; }
+  .tf-row { grid-template-columns: 1fr; }
+}
+
 </style>
 </head>
 <body>
@@ -989,6 +1409,158 @@ body {
      🍞 Toast 容器
      ============================================================ -->
 <div class="toast-container" id="toastContainer"></div>
+
+
+<!-- ============================================================
+     🎨 Phase 1-5: 交易輸入表單
+     ============================================================ -->
+
+<!-- 主畫面入口（暫時放這） -->
+<section id="main-section" style="padding: 40px 20px; text-align: center;">
+  <h2 style="color: #e5e7eb; margin-bottom: 24px;">📊 投資交易日誌</h2>
+  <button class="add-trade-btn" id="btnAddTrade">
+    <span style="font-size: 22px;">＋</span>
+    <span>新增交易</span>
+  </button>
+  <p style="color: #6b7280; margin-top: 16px; font-size: 13px;">
+    記錄每一筆台股 / 美股交易，自動計算手續費、稅務與損益
+  </p>
+</section>
+
+<!-- 交易列表區 -->
+<section class="trade-list-section">
+  <h3>📋 最近交易紀錄</h3>
+  <div id="tradeList">
+    <div class="trade-list-empty">尚無交易紀錄，點上方按鈕新增一筆！</div>
+  </div>
+</section>
+
+<!-- ── Modal 對話框 ── -->
+<div class="tf-modal-overlay" id="tfModal">
+  <div class="tf-modal">
+
+    <!-- 標題列 -->
+    <div class="tf-header">
+      <h3 id="tfTitle">📝 新增交易紀錄</h3>
+      <button class="tf-close-btn" id="tfClose">✕</button>
+    </div>
+
+    <!-- BUY/SELL Tabs -->
+    <div class="tf-tabs">
+      <button class="tf-tab buy active" data-type="BUY">📈 買入 BUY</button>
+      <button class="tf-tab sell" data-type="SELL">📉 賣出 SELL</button>
+    </div>
+
+    <!-- 表單內容 -->
+    <div class="tf-body">
+      <form id="tfForm" autocomplete="off" onsubmit="return false;">
+
+        <!-- 交易日期 -->
+        <div class="tf-field">
+          <label class="tf-label">📅 交易日期 <span class="required">*</span></label>
+          <input type="date" class="tf-input" id="tfDate" required>
+          <div class="tf-error-text" id="tfDateErr"></div>
+        </div>
+
+        <!-- 股票（用 Autocomplete） -->
+        <div class="tf-field">
+          <label class="tf-label">📈 股票 <span class="required">*</span></label>
+          <input type="text" class="tf-input" id="tfStock"
+                 placeholder="輸入代號或名稱（如 2330、台積、AAPL）">
+          <div class="tf-error-text" id="tfStockErr"></div>
+          <div class="tf-hint-text" id="tfStockHint"></div>
+        </div>
+
+        <!-- 價格 + 股數 -->
+        <div class="tf-row">
+          <div class="tf-field">
+            <label class="tf-label">💰 成交價 <span class="required">*</span>
+              <span id="tfCurrency" style="color:#6b7280;">(TWD)</span>
+            </label>
+            <input type="number" class="tf-input" id="tfPrice" step="0.01" min="0" placeholder="0.00">
+            <div class="tf-error-text" id="tfPriceErr"></div>
+          </div>
+          <div class="tf-field">
+            <label class="tf-label">📊 股數 <span class="required">*</span></label>
+            <input type="number" class="tf-input" id="tfShares" step="1" min="1" placeholder="0">
+            <div class="tf-error-text" id="tfSharesErr"></div>
+            <div class="tf-hint-text" id="tfSharesHint"></div>
+          </div>
+        </div>
+
+        <!-- 進階選項 -->
+        <div class="tf-advanced" id="tfAdvanced">
+          <button type="button" class="tf-advanced-toggle" id="tfAdvancedToggle">
+            <span>⚙️ 進階選項</span>
+            <span class="arrow">▼</span>
+          </button>
+          <div class="tf-advanced-content">
+            <!-- 手續費折扣（台股） -->
+            <div class="tf-field" id="tfDiscountField">
+              <label class="tf-label">手續費折扣</label>
+              <select class="tf-select" id="tfDiscount">
+                <option value="0.28" selected>2.8 折（國泰）</option>
+                <option value="0.6">6 折</option>
+                <option value="0.65">6.5 折</option>
+                <option value="0.5">5 折</option>
+                <option value="1">無折扣（原價）</option>
+              </select>
+            </div>
+            <!-- 定期定額 -->
+            <label class="tf-checkbox" id="tfRegularField">
+              <input type="checkbox" id="tfRegular">
+              <span>定期定額</span>
+              <span class="desc">（手續費僅 1 元）</span>
+            </label>
+            <!-- ETF -->
+            <label class="tf-checkbox" id="tfETFField">
+              <input type="checkbox" id="tfETF">
+              <span>ETF</span>
+              <span class="desc">（賣出證交稅 0.1%）</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- 備註 -->
+        <div class="tf-field" style="margin-top: 12px;">
+          <label class="tf-label">📝 備註</label>
+          <textarea class="tf-textarea" id="tfNote" placeholder="（選填）寫下交易理由、心得..."></textarea>
+        </div>
+      </form>
+    </div>
+
+    <!-- 即時試算 -->
+    <div class="tf-calc-summary">
+      <div class="tf-calc-row">
+        <span class="label">小計</span>
+        <span class="value" id="tfCalcSubtotal">$0</span>
+      </div>
+      <div class="tf-calc-row">
+        <span class="label">手續費</span>
+        <span class="value" id="tfCalcFee">$0</span>
+      </div>
+      <div class="tf-calc-row" id="tfCalcTaxRow">
+        <span class="label">證交稅</span>
+        <span class="value" id="tfCalcTax">$0</span>
+      </div>
+      <div class="tf-calc-divider"></div>
+      <div class="tf-calc-row total">
+        <span class="label" id="tfCalcTotalLabel">總成本</span>
+        <span class="value buy" id="tfCalcTotal">$0</span>
+      </div>
+    </div>
+
+    <!-- 底部按鈕 -->
+    <div class="tf-footer">
+      <label class="keep-open">
+        <input type="checkbox" id="tfKeepOpen">
+        儲存後繼續新增
+      </label>
+      <button class="tf-btn tf-btn-cancel" id="tfCancel">取消</button>
+      <button class="tf-btn tf-btn-submit" id="tfSubmit">💾 儲存交易</button>
+    </div>
+  </div>
+</div>
 
 <!-- ============================================================
      📜 JavaScript（將在第 3、4 則訊息中提供）
@@ -3117,6 +3689,558 @@ const TradeStore = (() => {
 
 window.TradeStore = TradeStore;
 console.log('✅ TradeStore 已載入');
+
+// ============================================================
+// 🎨 Phase 1-5: TradeFormModal - 交易輸入表單
+// ============================================================
+
+const TradeFormModal = (() => {
+
+  // DOM 快取
+  let $modal, $title, $form;
+  let $tabBuy, $tabSell;
+  let $date, $stock, $stockHint;
+  let $price, $shares, $sharesHint, $currency;
+  let $discount, $regular, $etf;
+  let $discountField, $regularField, $etfField;
+  let $note, $keepOpen;
+  let $calcSubtotal, $calcFee, $calcTax, $calcTaxRow, $calcTotal, $calcTotalLabel;
+  let $btnSubmit, $btnCancel, $btnClose, $advanced, $advancedToggle;
+
+  // 狀態
+  let state = {
+    type: 'BUY',           // 'BUY' or 'SELL'
+    market: 'TW',          // 'TW' or 'US'
+    selectedStock: null,   // 從 Autocomplete 選的物件
+    editingId: null        // 編輯模式的 ID（之後用）
+  };
+
+  let autocompleteController = null;
+
+  // ─────────────────────────────────────
+  // 🛠️ 初始化（只跑一次）
+  // ─────────────────────────────────────
+  function init() {
+    // DOM
+    $modal           = document.getElementById('tfModal');
+    $title           = document.getElementById('tfTitle');
+    $form            = document.getElementById('tfForm');
+    $tabBuy          = document.querySelector('.tf-tab.buy');
+    $tabSell         = document.querySelector('.tf-tab.sell');
+    $date            = document.getElementById('tfDate');
+    $stock           = document.getElementById('tfStock');
+    $stockHint       = document.getElementById('tfStockHint');
+    $price           = document.getElementById('tfPrice');
+    $shares          = document.getElementById('tfShares');
+    $sharesHint      = document.getElementById('tfSharesHint');
+    $currency        = document.getElementById('tfCurrency');
+    $discount        = document.getElementById('tfDiscount');
+    $regular         = document.getElementById('tfRegular');
+    $etf             = document.getElementById('tfETF');
+    $discountField   = document.getElementById('tfDiscountField');
+    $regularField    = document.getElementById('tfRegularField');
+    $etfField        = document.getElementById('tfETFField');
+    $note            = document.getElementById('tfNote');
+    $keepOpen        = document.getElementById('tfKeepOpen');
+    $calcSubtotal    = document.getElementById('tfCalcSubtotal');
+    $calcFee         = document.getElementById('tfCalcFee');
+    $calcTax         = document.getElementById('tfCalcTax');
+    $calcTaxRow      = document.getElementById('tfCalcTaxRow');
+    $calcTotal       = document.getElementById('tfCalcTotal');
+    $calcTotalLabel  = document.getElementById('tfCalcTotalLabel');
+    $btnSubmit       = document.getElementById('tfSubmit');
+    $btnCancel       = document.getElementById('tfCancel');
+    $btnClose        = document.getElementById('tfClose');
+    $advanced        = document.getElementById('tfAdvanced');
+    $advancedToggle  = document.getElementById('tfAdvancedToggle');
+
+    // ── 事件綁定 ──
+    $btnClose.addEventListener('click', close);
+    $btnCancel.addEventListener('click', close);
+    $modal.addEventListener('click', (e) => {
+      if (e.target === $modal) close();   // 點背景關閉
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && $modal.classList.contains('active')) close();
+    });
+
+    // Tab 切換
+    $tabBuy.addEventListener('click', () => switchType('BUY'));
+    $tabSell.addEventListener('click', () => switchType('SELL'));
+
+    // 進階選項收合
+    $advancedToggle.addEventListener('click', () => {
+      $advanced.classList.toggle('open');
+    });
+
+    // 即時試算 trigger
+    [$price, $shares, $discount].forEach(el => {
+      el.addEventListener('input', recalculate);
+    });
+    [$regular, $etf].forEach(el => {
+      el.addEventListener('change', recalculate);
+    });
+
+    // 定期定額勾選時鎖手續費 select
+    $regular.addEventListener('change', () => {
+      $discount.disabled = $regular.checked;
+    });
+
+    // Autocomplete 綁定股票輸入框
+    if (typeof Autocomplete !== 'undefined') {
+      autocompleteController = Autocomplete.attach($stock, {
+        onSelect: handleStockSelect
+      });
+    }
+
+    // 股票輸入變更時，若清空則重置選擇
+    $stock.addEventListener('input', () => {
+      if (!$stock.value.trim()) {
+        state.selectedStock = null;
+        $stockHint.textContent = '';
+        $stockHint.className = 'tf-hint-text';
+      }
+    });
+
+    // 賣出時即時檢查持倉
+    $shares.addEventListener('input', () => {
+      if (state.type === 'SELL') checkPosition();
+    });
+
+    // 提交按鈕
+    $btnSubmit.addEventListener('click', submit);
+
+    // 主畫面入口按鈕
+    const $btnAdd = document.getElementById('btnAddTrade');
+    if ($btnAdd) {
+      $btnAdd.addEventListener('click', () => open('BUY'));
+    }
+
+    console.log('✅ TradeFormModal 已初始化');
+  }
+
+  // ─────────────────────────────────────
+  // 📂 開啟 Modal
+  // ─────────────────────────────────────
+  function open(type = 'BUY') {
+    reset();
+    switchType(type);
+    // 預設今天
+    $date.value = new Date().toISOString().slice(0, 10);
+    $modal.classList.add('active');
+    setTimeout(() => $stock.focus(), 100);
+  }
+
+  // ─────────────────────────────────────
+  // 📕 關閉 Modal
+  // ─────────────────────────────────────
+  function close() {
+    $modal.classList.remove('active');
+    if (autocompleteController) {
+      // Autocomplete 的下拉若還開著，隱藏
+      $stock.blur();
+    }
+  }
+
+  // ─────────────────────────────────────
+  // 🔄 切換 BUY/SELL
+  // ─────────────────────────────────────
+  function switchType(type) {
+    state.type = type;
+    if (type === 'BUY') {
+      $tabBuy.classList.add('active');
+      $tabSell.classList.remove('active');
+      $title.textContent = '📝 新增買入紀錄';
+      $btnSubmit.classList.remove('sell');
+      $calcTotalLabel.textContent = '總成本';
+      $calcTotal.classList.remove('sell');
+      $calcTotal.classList.add('buy');
+      $sharesHint.textContent = '';
+      $sharesHint.className = 'tf-hint-text';
+    } else {
+      $tabBuy.classList.remove('active');
+      $tabSell.classList.add('active');
+      $title.textContent = '📝 新增賣出紀錄';
+      $btnSubmit.classList.add('sell');
+      $calcTotalLabel.textContent = '實收金額';
+      $calcTotal.classList.remove('buy');
+      $calcTotal.classList.add('sell');
+      checkPosition();
+    }
+    recalculate();
+  }
+
+  // ─────────────────────────────────────
+  // 🧹 重置表單
+  // ─────────────────────────────────────
+  function reset() {
+    $form.reset();
+    state.selectedStock = null;
+    state.editingId = null;
+    $date.value = new Date().toISOString().slice(0, 10);
+    $discount.value = '0.28';
+    $discount.disabled = false;
+    $regular.checked = false;
+    $etf.checked = false;
+    $stockHint.textContent = '';
+    $stockHint.className = 'tf-hint-text';
+    $sharesHint.textContent = '';
+    $sharesHint.className = 'tf-hint-text';
+    clearAllErrors();
+    state.market = 'TW';
+    updateMarketUI();
+    recalculate();
+  }
+
+  // ─────────────────────────────────────
+  // 📈 處理股票選擇
+  // ─────────────────────────────────────
+  function handleStockSelect(stock) {
+    state.selectedStock = stock;
+    state.market = stock.market || 'TW';
+
+    $stockHint.innerHTML = `<span style="color:#22c55e;">✓</span> 已選：${stock.code} ${stock.name} <span style="color:#6b7280;">(${stock.market})</span>`;
+    $stockHint.className = 'tf-hint-text ok';
+
+    // 自動偵測 ETF（簡易判斷：代號是 4 位純數字 + 開頭 0 或名稱含 ETF）
+    const isETF = (stock.market === 'TW' && /^00\d{2,3}$/.test(stock.code))
+               || /ETF/i.test(stock.name);
+    $etf.checked = isETF;
+
+    updateMarketUI();
+    clearError('tfStock');
+
+    // 賣出時檢查持倉
+    if (state.type === 'SELL') checkPosition();
+
+    recalculate();
+  }
+
+  // ─────────────────────────────────────
+  // 🌐 依市場更新 UI（顯示/隱藏台股欄位）
+  // ─────────────────────────────────────
+  function updateMarketUI() {
+    if (state.market === 'US') {
+      $currency.textContent = '(USD)';
+      $discountField.style.display = 'none';
+      $regularField.style.display  = 'none';
+      $etfField.style.display      = 'block';   // 美股還是有 ETF 但不影響稅
+      $price.step = '0.01';
+      $shares.step = '0.0001';                  // 美股允許小數
+      $shares.min  = '0.0001';
+      $calcTaxRow.style.display = state.type === 'SELL' ? 'flex' : 'none';
+    } else {
+      $currency.textContent = '(TWD)';
+      $discountField.style.display = 'block';
+      $regularField.style.display  = 'block';
+      $etfField.style.display      = 'block';
+      $price.step = '0.01';
+      $shares.step = '1';                       // 台股零股最小 1 股
+      $shares.min  = '1';
+      $calcTaxRow.style.display = state.type === 'SELL' ? 'flex' : 'none';
+    }
+
+    // 買入時不顯示稅
+    if (state.type === 'BUY') $calcTaxRow.style.display = 'none';
+  }
+
+  // ─────────────────────────────────────
+  // 🧮 即時試算
+  // ─────────────────────────────────────
+  function recalculate() {
+    const price  = parseFloat($price.value) || 0;
+    const shares = parseFloat($shares.value) || 0;
+
+    if (price <= 0 || shares <= 0) {
+      $calcSubtotal.textContent = formatMoney(0, state.market);
+      $calcFee.textContent      = formatMoney(0, state.market);
+      $calcTax.textContent      = formatMoney(0, state.market);
+      $calcTotal.textContent    = formatMoney(0, state.market);
+      return;
+    }
+
+    const opts = {
+      price,
+      shares,
+      market: state.market,
+      isRegularInvest: $regular.checked,
+      feeDiscount: parseFloat($discount.value) || 0.28
+    };
+
+    let subtotal, fee, tax = 0, total;
+
+    if (state.type === 'BUY') {
+      const r = TradeCalculator.calculateBuyCost(opts);
+      subtotal = r.subtotal; fee = r.fee; total = r.total;
+      $calcTaxRow.style.display = 'none';
+    } else {
+      opts.isETF = $etf.checked;
+      const r = TradeCalculator.calculateSellRevenue(opts);
+      subtotal = r.subtotal; fee = r.fee; tax = r.tax; total = r.net;
+      $calcTaxRow.style.display = 'flex';
+    }
+
+    $calcSubtotal.textContent = formatMoney(subtotal, state.market);
+    $calcFee.textContent      = formatMoney(fee, state.market);
+    $calcTax.textContent      = formatMoney(tax, state.market);
+    $calcTotal.textContent    = formatMoney(total, state.market);
+  }
+
+  // ─────────────────────────────────────
+  // 💱 金額格式化
+  // ─────────────────────────────────────
+  function formatMoney(num, market) {
+    const symbol = market === 'US' ? 'US$' : 'NT$';
+    const formatted = Number(num).toLocaleString('en-US', {
+      minimumFractionDigits: market === 'US' ? 2 : 0,
+      maximumFractionDigits: 2
+    });
+    return `${symbol} ${formatted}`;
+  }
+
+  // ─────────────────────────────────────
+  // 📊 賣出時檢查持倉
+  // ─────────────────────────────────────
+  async function checkPosition() {
+    if (state.type !== 'SELL' || !state.selectedStock) {
+      $sharesHint.textContent = '';
+      $sharesHint.className = 'tf-hint-text';
+      return;
+    }
+
+    try {
+      const positions = await TradeStore.calculatePositions();
+      const pos = positions.find(p =>
+        p.code === state.selectedStock.code &&
+        p.market === state.selectedStock.market
+      );
+
+      if (!pos || pos.shares <= 0) {
+        $sharesHint.textContent = `⚠️ 目前未持有 ${state.selectedStock.code}`;
+        $sharesHint.className = 'tf-hint-text warn';
+        return;
+      }
+
+      const sellShares = parseFloat($shares.value) || 0;
+      if (sellShares > pos.shares) {
+        $sharesHint.textContent = `⚠️ 持有 ${pos.shares.toLocaleString()} 股，賣出超出持倉！`;
+        $sharesHint.className = 'tf-hint-text warn';
+      } else {
+        $sharesHint.textContent = `✓ 目前持有 ${pos.shares.toLocaleString()} 股，平均成本 ${pos.avgCost}`;
+        $sharesHint.className = 'tf-hint-text ok';
+      }
+    } catch (e) {
+      console.warn('檢查持倉失敗', e);
+    }
+  }
+
+  // ─────────────────────────────────────
+  // ✅ 表單驗證
+  // ─────────────────────────────────────
+  function validate() {
+    clearAllErrors();
+    let ok = true;
+
+    if (!$date.value) {
+      showError('tfDate', '請選擇交易日期');
+      ok = false;
+    }
+
+    if (!state.selectedStock) {
+      showError('tfStock', '請從下拉選單選擇股票');
+      ok = false;
+    }
+
+    const price = parseFloat($price.value);
+    if (!price || price <= 0) {
+      showError('tfPrice', '請輸入有效的成交價');
+      ok = false;
+    }
+
+    const shares = parseFloat($shares.value);
+    if (!shares || shares <= 0) {
+      showError('tfShares', '請輸入有效的股數');
+      ok = false;
+    } else if (state.market === 'TW' && !Number.isInteger(shares)) {
+      showError('tfShares', '台股股數必須為整數');
+      ok = false;
+    }
+
+    return ok;
+  }
+
+  function showError(fieldId, msg) {
+    const $field = document.getElementById(fieldId);
+    const $err = document.getElementById(fieldId + 'Err');
+    if ($field) $field.classList.add('error');
+    if ($err) {
+      $err.textContent = msg;
+      $err.classList.add('show');
+    }
+  }
+
+  function clearError(fieldId) {
+    const $field = document.getElementById(fieldId);
+    const $err = document.getElementById(fieldId + 'Err');
+    if ($field) $field.classList.remove('error');
+    if ($err) $err.classList.remove('show');
+  }
+
+  function clearAllErrors() {
+    ['tfDate', 'tfStock', 'tfPrice', 'tfShares'].forEach(clearError);
+  }
+
+  // ─────────────────────────────────────
+  // 💾 提交儲存
+  // ─────────────────────────────────────
+  async function submit() {
+    if (!validate()) return;
+
+    const price  = parseFloat($price.value);
+    const shares = parseFloat($shares.value);
+    const stock  = state.selectedStock;
+
+    const calcOpts = {
+      price, shares,
+      market: stock.market,
+      isRegularInvest: $regular.checked,
+      feeDiscount: parseFloat($discount.value) || 0.28
+    };
+
+    let calc;
+    if (state.type === 'BUY') {
+      calc = TradeCalculator.calculateBuyCost(calcOpts);
+    } else {
+      calcOpts.isETF = $etf.checked;
+      calc = TradeCalculator.calculateSellRevenue(calcOpts);
+    }
+
+    const tradeData = {
+      date: $date.value,
+      code: stock.code,
+      name: stock.name,
+      market: stock.market,
+      type: state.type,
+      shares,
+      price,
+      fee: calc.fee,
+      tax: calc.tax || 0,
+      total: state.type === 'BUY' ? calc.total : calc.net,
+      isETF: $etf.checked,
+      isRegularInvest: $regular.checked,
+      feeDiscount: parseFloat($discount.value) || null,
+      note: $note.value.trim()
+    };
+
+    try {
+      $btnSubmit.disabled = true;
+      const id = await TradeStore.addTrade(tradeData);
+      console.log('✅ 交易已儲存', id, tradeData);
+
+      showToast(`✅ 已儲存：${stock.code} ${state.type === 'BUY' ? '買入' : '賣出'} ${shares.toLocaleString()} 股`);
+
+      // 刷新交易列表
+      if (typeof refreshTradeList === 'function') {
+        await refreshTradeList();
+      }
+
+      // 連續新增模式
+      if ($keepOpen.checked) {
+        // 保留日期、市場設定，清空股票/價格/股數
+        $stock.value = '';
+        $price.value = '';
+        $shares.value = '';
+        $note.value = '';
+        state.selectedStock = null;
+        $stockHint.textContent = '';
+        $stockHint.className = 'tf-hint-text';
+        $sharesHint.textContent = '';
+        $sharesHint.className = 'tf-hint-text';
+        recalculate();
+        $stock.focus();
+      } else {
+        close();
+      }
+    } catch (e) {
+      console.error('儲存失敗', e);
+      showToast('❌ 儲存失敗：' + e.message, 'error');
+    } finally {
+      $btnSubmit.disabled = false;
+    }
+  }
+
+  // ─────────────────────────────────────
+  // 🍞 Toast 提示
+  // ─────────────────────────────────────
+  function showToast(msg, type = 'success') {
+    const $toast = document.createElement('div');
+    $toast.className = 'tf-toast' + (type === 'error' ? ' error' : '');
+    $toast.textContent = msg;
+    document.body.appendChild($toast);
+    setTimeout(() => {
+      $toast.classList.add('fade-out');
+      setTimeout(() => $toast.remove(), 300);
+    }, 2500);
+  }
+
+  // 對外 API
+  return { init, open, close };
+})();
+
+// ─────────────────────────────────────
+// 📋 簡易交易列表（先做基本版，下個 Phase 強化）
+// ─────────────────────────────────────
+async function refreshTradeList() {
+  const $list = document.getElementById('tradeList');
+  if (!$list) return;
+
+  const trades = await TradeStore.getAllTrades();
+  if (trades.length === 0) {
+    $list.innerHTML = '<div class="trade-list-empty">尚無交易紀錄，點上方按鈕新增一筆!</div>';
+    return;
+  }
+
+  // 只顯示最近 10 筆
+  const recent = trades.slice(0, 10);
+  $list.innerHTML = recent.map(t => `
+    <div class="trade-item" data-id="${t.id}">
+      <span class="date">${t.date}</span>
+      <span class="stock">
+        <span class="code">${t.code}</span>
+        <span class="name">${t.name}</span>
+      </span>
+      <span class="type ${t.type}">${t.type === 'BUY' ? '買' : '賣'}</span>
+      <span class="amount">
+        ${t.shares.toLocaleString()} × ${t.price}
+      </span>
+      <button class="delete-btn" data-id="${t.id}" title="刪除">🗑️</button>
+    </div>
+  `).join('');
+
+  // 綁定刪除按鈕
+  $list.querySelectorAll('.delete-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const id = parseInt(e.currentTarget.dataset.id);
+      if (confirm(`確定要刪除這筆交易嗎？`)) {
+        await TradeStore.deleteTrade(id);
+        await refreshTradeList();
+      }
+    });
+  });
+}
+
+// ─────────────────────────────────────
+// 🚀 啟動
+// ─────────────────────────────────────
+document.addEventListener('DOMContentLoaded', async () => {
+  TradeFormModal.init();
+  await refreshTradeList();
+});
+
+window.TradeFormModal = TradeFormModal;
+window.refreshTradeList = refreshTradeList;
+console.log('✅ TradeFormModal 已載入');
+
 
 // 自動開啟資料庫
 TradeStore.open().catch(err => console.error('TradeStore 開啟失敗:', err));

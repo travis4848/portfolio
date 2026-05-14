@@ -2291,6 +2291,462 @@ const Autocomplete = {
 // ============================================================
 console.log('[Portfolio v2.0.0] Part 1 已載入：CONFIG / Utils / DataStructure / Migration / Storage / Stats / Snapshot');
 
+// ============================================================
+// 🧮 TradeCalculator - 交易計算引擎
+// ============================================================
+// 功能：計算買賣成本、損益、報酬率、加權平均成本等
+// 支援：台股、美股
+// 規則：
+//   - 台股手續費 0.1425%（可調折扣，預設 2.8 折）
+//   - 台股手續費下限 20 元（定期定額除外，1 元）
+//   - 台股證交稅：一般 0.3% / ETF 0.1%（賣出）
+//   - 美股：預設免手續費（海外券商模式）
+// ============================================================
+
+const TradeCalculator = (() => {
+
+  // ─────────────────────────────────────
+  // 📐 預設設定（可由使用者覆寫）
+  // ─────────────────────────────────────
+  const DEFAULTS = {
+    TW: {
+      feeRate: 0.001425,        // 手續費率 0.1425%
+      feeDiscount: 0.28,        // 折扣 2.8 折（國泰）
+      feeMin: 20,               // 手續費下限 20 元
+      feeMinRegular: 1,         // 定期定額手續費 1 元（國泰優惠）
+      taxRate: 0.003,           // 一般證交稅 0.3%
+      taxRateETF: 0.001         // ETF 證交稅 0.1%
+    },
+    US: {
+      feeRate: 0,               // 免手續費
+      feeDiscount: 1,
+      feeMin: 0,
+      feeMinRegular: 0,
+      taxRate: 0,               // 簡化版不計 SEC Fee
+      taxRateETF: 0
+    }
+  };
+
+  // ─────────────────────────────────────
+  // 🛠️ 工具函式
+  // ─────────────────────────────────────
+
+  /** 取得市場的設定（合併使用者覆寫） */
+  function _getConfig(market, overrides = {}) {
+    const base = DEFAULTS[market] || DEFAULTS.TW;
+    return { ...base, ...overrides };
+  }
+
+  /** 四捨五入到整數（台股手續費通常無條件捨去，但本系統採四捨五入） */
+  function _round(num) {
+    return Math.round(num);
+  }
+
+  /** 四捨五入到小數點 N 位 */
+  function _roundTo(num, decimals = 2) {
+    const factor = Math.pow(10, decimals);
+    return Math.round(num * factor) / factor;
+  }
+
+  /** 計算手續費（內部用） */
+  function _calcFee(amount, market, options = {}) {
+    const config = _getConfig(market, options);
+    const isRegular = options.isRegularInvest || false;  // 是否為定期定額
+
+    if (config.feeRate === 0) return 0;  // 美股免手續費
+
+    const rawFee = amount * config.feeRate * config.feeDiscount;
+    const minFee = isRegular ? config.feeMinRegular : config.feeMin;
+
+    // 台股手續費：取「計算值」與「下限」的較大者
+    return _round(Math.max(rawFee, minFee));
+  }
+
+  // ─────────────────────────────────────
+  // 💰 1. 買入成本計算
+  // ─────────────────────────────────────
+
+  /**
+   * 計算買入總成本
+   * @param {Object} params
+   * @param {number} params.price - 買入價格
+   * @param {number} params.shares - 買入股數
+   * @param {string} params.market - 市場 'TW' | 'US'
+   * @param {number} [params.feeDiscount] - 手續費折扣（覆寫預設）
+   * @param {boolean} [params.isRegularInvest] - 是否為定期定額
+   * @returns {Object} { subtotal, fee, total }
+   */
+  function calculateBuyCost({ price, shares, market = 'TW', feeDiscount, isRegularInvest = false }) {
+    if (price <= 0 || shares <= 0) {
+      return { subtotal: 0, fee: 0, total: 0 };
+    }
+
+    const subtotal = price * shares;
+    const options = { isRegularInvest };
+    if (feeDiscount !== undefined) options.feeDiscount = feeDiscount;
+
+    const fee = _calcFee(subtotal, market, options);
+    const total = subtotal + fee;
+
+    return {
+      subtotal: _roundTo(subtotal, 2),
+      fee: fee,
+      total: _roundTo(total, 2)
+    };
+  }
+
+  // ─────────────────────────────────────
+  // 💵 2. 賣出收入計算
+  // ─────────────────────────────────────
+
+  /**
+   * 計算賣出實際收入（扣手續費和稅）
+   * @param {Object} params
+   * @param {number} params.price
+   * @param {number} params.shares
+   * @param {string} params.market
+   * @param {boolean} [params.isETF] - 是否為 ETF（影響證交稅率）
+   * @param {number} [params.feeDiscount]
+   * @returns {Object} { subtotal, fee, tax, net }
+   */
+  function calculateSellRevenue({ price, shares, market = 'TW', isETF = false, feeDiscount }) {
+    if (price <= 0 || shares <= 0) {
+      return { subtotal: 0, fee: 0, tax: 0, net: 0 };
+    }
+
+    const subtotal = price * shares;
+    const options = {};
+    if (feeDiscount !== undefined) options.feeDiscount = feeDiscount;
+
+    const fee = _calcFee(subtotal, market, options);
+
+    // 證交稅
+    const config = _getConfig(market, options);
+    const taxRate = isETF ? config.taxRateETF : config.taxRate;
+    const tax = _round(subtotal * taxRate);
+
+    const net = subtotal - fee - tax;
+
+    return {
+      subtotal: _roundTo(subtotal, 2),
+      fee: fee,
+      tax: tax,
+      net: _roundTo(net, 2)
+    };
+  }
+
+  // ─────────────────────────────────────
+  // 📊 3. 加權平均成本
+  // ─────────────────────────────────────
+
+  /**
+   * 計算多筆買入的加權平均成本
+   * @param {Array} buyTrades - [{ shares, price, fee }, ...]
+   * @returns {Object} { totalShares, totalCost, avgCost, avgPrice }
+   */
+  function calculateAvgCost(buyTrades) {
+    if (!buyTrades || buyTrades.length === 0) {
+      return { totalShares: 0, totalCost: 0, avgCost: 0, avgPrice: 0 };
+    }
+
+    let totalShares = 0;
+    let totalCost = 0;       // 含手續費
+    let totalAmount = 0;     // 不含手續費（純股價）
+
+    buyTrades.forEach(t => {
+      const shares = t.shares || 0;
+      const price = t.price || 0;
+      const fee = t.fee || 0;
+
+      totalShares += shares;
+      totalAmount += shares * price;
+      totalCost += shares * price + fee;
+    });
+
+    const avgCost = totalShares > 0 ? totalCost / totalShares : 0;
+    const avgPrice = totalShares > 0 ? totalAmount / totalShares : 0;
+
+    return {
+      totalShares: totalShares,
+      totalCost: _roundTo(totalCost, 2),
+      avgCost: _roundTo(avgCost, 4),    // 平均成本（含費用）
+      avgPrice: _roundTo(avgPrice, 4)   // 平均價格（不含費用）
+    };
+  }
+
+  // ─────────────────────────────────────
+  // 📈 4. FIFO 先進先出計算
+  // ─────────────────────────────────────
+
+  /**
+   * FIFO 模式：從最早的買入開始扣除
+   * @param {Array} buyTrades - 買入記錄（按時間排序）
+   * @param {number} sellShares - 賣出股數
+   * @returns {Object} { matchedBuys, totalCost, avgCost, remainingBuys }
+   */
+  function calculateFIFOCost(buyTrades, sellShares) {
+    if (!buyTrades || buyTrades.length === 0 || sellShares <= 0) {
+      return { matchedBuys: [], totalCost: 0, avgCost: 0, remainingBuys: [] };
+    }
+
+    // 複製陣列避免汙染原資料
+    const queue = buyTrades.map(t => ({ ...t }));
+    const matchedBuys = [];
+    let remaining = sellShares;
+    let totalCost = 0;
+
+    for (let i = 0; i < queue.length && remaining > 0; i++) {
+      const trade = queue[i];
+      if (trade.shares <= 0) continue;
+
+      const matchShares = Math.min(trade.shares, remaining);
+      const matchPrice = trade.price;
+      // 按比例分攤手續費
+      const matchFee = (trade.fee || 0) * (matchShares / trade.shares);
+      const matchCost = matchShares * matchPrice + matchFee;
+
+      matchedBuys.push({
+        shares: matchShares,
+        price: matchPrice,
+        fee: _roundTo(matchFee, 2),
+        cost: _roundTo(matchCost, 2),
+        date: trade.date
+      });
+
+      totalCost += matchCost;
+      trade.shares -= matchShares;
+      trade.fee = (trade.fee || 0) * (trade.shares / (trade.shares + matchShares) || 0);
+      remaining -= matchShares;
+    }
+
+    const totalMatched = sellShares - remaining;
+    const avgCost = totalMatched > 0 ? totalCost / totalMatched : 0;
+    const remainingBuys = queue.filter(t => t.shares > 0);
+
+    return {
+      matchedBuys: matchedBuys,
+      totalCost: _roundTo(totalCost, 2),
+      avgCost: _roundTo(avgCost, 4),
+      remainingBuys: remainingBuys,
+      unmatchedShares: remaining   // 賣超的股數（資料異常時）
+    };
+  }
+
+  // ─────────────────────────────────────
+  // 💸 5. 已實現損益（賣出時計算）
+  // ─────────────────────────────────────
+
+  /**
+   * 計算單筆賣出的已實現損益
+   * @param {Object} params
+   * @param {number} params.sellPrice - 賣出價
+   * @param {number} params.sellShares - 賣出股數
+   * @param {number} params.avgCost - 平均成本（含費用）
+   * @param {string} params.market
+   * @param {boolean} [params.isETF]
+   * @param {number} [params.feeDiscount]
+   * @returns {Object} 詳細損益
+   */
+  function calculateRealizedPnL({ sellPrice, sellShares, avgCost, market = 'TW', isETF = false, feeDiscount }) {
+    const sell = calculateSellRevenue({
+      price: sellPrice,
+      shares: sellShares,
+      market,
+      isETF,
+      feeDiscount
+    });
+
+    const costBasis = avgCost * sellShares;
+    const profit = sell.net - costBasis;
+    const profitRate = costBasis > 0 ? profit / costBasis : 0;
+
+    return {
+      sellSubtotal: sell.subtotal,
+      sellFee: sell.fee,
+      sellTax: sell.tax,
+      sellNet: sell.net,
+      costBasis: _roundTo(costBasis, 2),
+      profit: _roundTo(profit, 2),
+      profitRate: _roundTo(profitRate, 6),
+      profitRatePercent: _roundTo(profitRate * 100, 2)
+    };
+  }
+
+  // ─────────────────────────────────────
+  // 📉 6. 未實現損益（持有中）
+  // ─────────────────────────────────────
+
+  /**
+   * 計算當前持有部位的未實現損益
+   * @param {Object} params
+   * @param {number} params.shares - 持有股數
+   * @param {number} params.avgCost - 平均成本（含費用）
+   * @param {number} params.currentPrice - 當前價格
+   * @returns {Object}
+   */
+  function calculateUnrealizedPnL({ shares, avgCost, currentPrice }) {
+    if (shares <= 0 || avgCost <= 0) {
+      return {
+        marketValue: 0,
+        costBasis: 0,
+        profit: 0,
+        profitRate: 0,
+        profitRatePercent: 0
+      };
+    }
+
+    const marketValue = shares * currentPrice;
+    const costBasis = shares * avgCost;
+    const profit = marketValue - costBasis;
+    const profitRate = costBasis > 0 ? profit / costBasis : 0;
+
+    return {
+      marketValue: _roundTo(marketValue, 2),
+      costBasis: _roundTo(costBasis, 2),
+      profit: _roundTo(profit, 2),
+      profitRate: _roundTo(profitRate, 6),
+      profitRatePercent: _roundTo(profitRate * 100, 2)
+    };
+  }
+
+  // ─────────────────────────────────────
+  // 📅 7. 持有天數與年化報酬率
+  // ─────────────────────────────────────
+
+  /** 計算兩個日期之間的天數 */
+  function calculateHoldingDays(startDate, endDate = new Date()) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const ms = end.getTime() - start.getTime();
+    return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)));
+  }
+
+  /**
+   * 計算年化報酬率
+   * 公式：(1 + 總報酬率)^(365/持有天數) - 1
+   * @param {number} totalReturn - 總報酬率（小數，如 0.15 表 15%）
+   * @param {number} days - 持有天數
+   */
+  function calculateAnnualizedReturn(totalReturn, days) {
+    if (days <= 0) return 0;
+    if (days >= 365) {
+      // 已超過 1 年，使用標準年化公式
+      const annualized = Math.pow(1 + totalReturn, 365 / days) - 1;
+      return _roundTo(annualized, 6);
+    } else {
+      // 不滿一年，仍可估算（但要註明為「估算值」）
+      const annualized = Math.pow(1 + totalReturn, 365 / days) - 1;
+      return _roundTo(annualized, 6);
+    }
+  }
+
+  // ─────────────────────────────────────
+  // 📊 8. 投資組合整體統計
+  // ─────────────────────────────────────
+
+  /**
+   * 計算投資組合的整體統計
+   * @param {Array} positions - 持倉陣列
+   *   [{ code, shares, avgCost, currentPrice, market, ... }, ...]
+   * @returns {Object}
+   */
+  function calculatePortfolioStats(positions) {
+    if (!positions || positions.length === 0) {
+      return {
+        totalCost: 0,
+        totalValue: 0,
+        totalProfit: 0,
+        totalProfitRate: 0,
+        totalProfitRatePercent: 0,
+        positionCount: 0
+      };
+    }
+
+    let totalCost = 0;
+    let totalValue = 0;
+
+    positions.forEach(p => {
+      const pnl = calculateUnrealizedPnL({
+        shares: p.shares,
+        avgCost: p.avgCost,
+        currentPrice: p.currentPrice
+      });
+      totalCost += pnl.costBasis;
+      totalValue += pnl.marketValue;
+    });
+
+    const totalProfit = totalValue - totalCost;
+    const totalProfitRate = totalCost > 0 ? totalProfit / totalCost : 0;
+
+    return {
+      totalCost: _roundTo(totalCost, 2),
+      totalValue: _roundTo(totalValue, 2),
+      totalProfit: _roundTo(totalProfit, 2),
+      totalProfitRate: _roundTo(totalProfitRate, 6),
+      totalProfitRatePercent: _roundTo(totalProfitRate * 100, 2),
+      positionCount: positions.length
+    };
+  }
+
+  /**
+   * 計算各持倉佔投資組合的比例
+   * @param {Array} positions
+   * @returns {Array} 加上 allocation 欄位（百分比）的持倉陣列
+   */
+  function calculateAllocation(positions) {
+    if (!positions || positions.length === 0) return [];
+
+    const stats = calculatePortfolioStats(positions);
+    const totalValue = stats.totalValue;
+
+    return positions.map(p => {
+      const value = p.shares * p.currentPrice;
+      const allocation = totalValue > 0 ? (value / totalValue) * 100 : 0;
+      return {
+        ...p,
+        marketValue: _roundTo(value, 2),
+        allocation: _roundTo(allocation, 2)
+      };
+    });
+  }
+
+  // ─────────────────────────────────────
+  // 🌐 對外 API
+  // ─────────────────────────────────────
+  return {
+    // 設定
+    DEFAULTS,
+
+    // 費用計算
+    calculateBuyCost,
+    calculateSellRevenue,
+
+    // 成本計算
+    calculateAvgCost,
+    calculateFIFOCost,
+
+    // 損益計算
+    calculateRealizedPnL,
+    calculateUnrealizedPnL,
+
+    // 統計指標
+    calculateHoldingDays,
+    calculateAnnualizedReturn,
+
+    // 投資組合
+    calculatePortfolioStats,
+    calculateAllocation,
+
+    // 開放內部工具（測試用）
+    _calcFee,
+    _round,
+    _roundTo
+  };
+})();
+
+// 全域曝露（測試用）
+window.TradeCalculator = TradeCalculator;
+console.log('✅ TradeCalculator 已載入');
 
 
 

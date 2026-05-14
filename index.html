@@ -1333,25 +1333,37 @@ body {
         </div>
     </section>
     
-    <!-- 分頁導航 -->
-    <nav class="tab-nav">
-        <button class="tab-btn active" data-tab="stocks">📈 持股</button>
-        <button class="tab-btn" data-tab="futures">📉 期貨</button>
-        <button class="tab-btn" data-tab="watchlist">👁️ 觀察清單</button>
-        <button class="tab-btn" data-tab="settings">⚙️ 設定</button>
-    </nav>
+<!-- 分頁導航 -->
+<nav class="tab-nav">
+    <button class="tab-btn active" data-tab="stocks">📈 持股</button>
+    <button class="tab-btn" data-tab="trades">📝 交易</button>
+    <button class="tab-btn" data-tab="futures">📉 期貨</button>
+    <button class="tab-btn" data-tab="watchlist">👁️ 觀察清單</button>
+    <button class="tab-btn" data-tab="settings">⚙️ 設定</button>
+</nav>
     
-    <!-- 持股分頁 -->
-    <section class="tab-content active" id="tab-stocks">
-        <div class="section-header">
-            <h2 class="section-title">我的持股</h2>
-            <button class="btn btn-primary" id="addStockBtn">＋ 新增持股</button>
-        </div>
-        <div id="stocksContainer"></div>
-    </section>
-    
-    <!-- 期貨分頁 -->
-    <section class="tab-content" id="tab-futures">
+<!-- 持股分頁 -->
+<section class="tab-content active" id="tab-stocks">
+    <div class="section-header">
+        <h2 class="section-title">我的持股</h2>
+        <span style="color: var(--text-tertiary); font-size: 0.85rem;">
+            💡 持股自動從交易紀錄計算
+        </span>
+    </div>
+    <div id="stocksContainer"></div>
+</section>
+
+<!-- 📝 交易分頁（新增） -->
+<section class="tab-content" id="tab-trades">
+    <div class="section-header">
+        <h2 class="section-title">交易紀錄</h2>
+        <button class="btn btn-primary" id="addTradeBtn">＋ 新增交易</button>
+    </div>
+    <div id="tradeListContainer"></div>
+</section>
+
+<!-- 期貨分頁 -->
+<section class="tab-content" id="tab-futures">
         <div class="section-header">
             <h2 class="section-title">期貨部位</h2>
             <button class="btn btn-primary" id="addFuturesBtn">＋ 新增部位</button>
@@ -1412,31 +1424,12 @@ body {
 
 
 <!-- ============================================================
-     🎨 Phase 1-5: 交易輸入表單
+     🎨 Phase 1-5: 交易輸入表單 Modal
      ============================================================ -->
-
-<!-- 主畫面入口（暫時放這） -->
-<section id="main-section" style="padding: 40px 20px; text-align: center;">
-  <h2 style="color: #e5e7eb; margin-bottom: 24px;">📊 投資交易日誌</h2>
-  <button class="add-trade-btn" id="btnAddTrade">
-    <span style="font-size: 22px;">＋</span>
-    <span>新增交易</span>
-  </button>
-  <p style="color: #6b7280; margin-top: 16px; font-size: 13px;">
-    記錄每一筆台股 / 美股交易，自動計算手續費、稅務與損益
-  </p>
-</section>
-
-<!-- 交易列表區 -->
-<section class="trade-list-section">
-  <h3>📋 最近交易紀錄</h3>
-  <div id="tradeList">
-    <div class="trade-list-empty">尚無交易紀錄，點上方按鈕新增一筆！</div>
-  </div>
-</section>
 
 <!-- ── Modal 對話框 ── -->
 <div class="tf-modal-overlay" id="tfModal">
+
   <div class="tf-modal">
 
     <!-- 標題列 -->
@@ -3810,10 +3803,10 @@ const TradeFormModal = (() => {
     // 提交按鈕
     $btnSubmit.addEventListener('click', submit);
 
-    // 主畫面入口按鈕
-    const $btnAdd = document.getElementById('btnAddTrade');
-    if ($btnAdd) {
-      $btnAdd.addEventListener('click', () => open('BUY'));
+    // 綁定「＋ 新增交易」按鈕（在「📝 交易」分頁內）
+    const $btnAddTrade = document.getElementById('addTradeBtn');
+    if ($btnAddTrade) {
+      $btnAddTrade.addEventListener('click', () => open('BUY'));
     }
 
     console.log('✅ TradeFormModal 已初始化');
@@ -4188,46 +4181,94 @@ const TradeFormModal = (() => {
 })();
 
 // ─────────────────────────────────────
-// 📋 簡易交易列表（先做基本版，下個 Phase 強化）
+// 📋 交易列表（顯示在「📝 交易」分頁）
 // ─────────────────────────────────────
 async function refreshTradeList() {
-  const $list = document.getElementById('tradeList');
+  // 改用新的容器 ID
+  const $list = document.getElementById('tradeListContainer');
   if (!$list) return;
 
   const trades = await TradeStore.getAllTrades();
+  
   if (trades.length === 0) {
-    $list.innerHTML = '<div class="trade-list-empty">尚無交易紀錄，點上方按鈕新增一筆!</div>';
+    $list.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state-icon">📭</div>
+        <div class="empty-state-text">尚無交易紀錄</div>
+        <button class="btn btn-primary" onclick="document.getElementById('addTradeBtn').click()">
+          ＋ 新增第一筆交易
+        </button>
+      </div>
+    `;
     return;
   }
 
-  // 只顯示最近 10 筆
-  const recent = trades.slice(0, 10);
-  $list.innerHTML = recent.map(t => `
-    <div class="trade-item" data-id="${t.id}">
-      <span class="date">${t.date}</span>
-      <span class="stock">
-        <span class="code">${t.code}</span>
-        <span class="name">${t.name}</span>
-      </span>
-      <span class="type ${t.type}">${t.type === 'BUY' ? '買' : '賣'}</span>
-      <span class="amount">
-        ${t.shares.toLocaleString()} × ${t.price}
-      </span>
-      <button class="delete-btn" data-id="${t.id}" title="刪除">🗑️</button>
+  // 顯示全部交易（之後可加篩選/分頁）
+  $list.innerHTML = `
+    <div class="table-container">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>市場</th>
+            <th>代號</th>
+            <th>名稱</th>
+            <th>類型</th>
+            <th style="text-align:right;">股數</th>
+            <th style="text-align:right;">價格</th>
+            <th style="text-align:right;">手續費</th>
+            <th style="text-align:right;">稅</th>
+            <th style="text-align:right;">總額</th>
+            <th>備註</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${trades.map(t => `
+            <tr data-id="${t.id}">
+              <td>${t.date}</td>
+              <td><span style="font-size:11px; padding:2px 8px; border-radius:4px; background:${t.market === 'TW' ? '#1e40af' : '#7c2d12'}; color:white;">${t.market}</span></td>
+              <td style="color:#60a5fa; font-weight:600;">${t.code}</td>
+              <td>${t.name || '-'}</td>
+              <td>
+                <span style="padding:3px 10px; border-radius:4px; font-size:11px; font-weight:600; background:${t.type === 'BUY' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)'}; color:${t.type === 'BUY' ? '#22c55e' : '#ef4444'};">
+                  ${t.type === 'BUY' ? '買入' : '賣出'}
+                </span>
+              </td>
+              <td style="text-align:right;">${t.shares.toLocaleString()}</td>
+              <td style="text-align:right;">${t.price}</td>
+              <td style="text-align:right; color:#9ca3af;">${t.fee}</td>
+              <td style="text-align:right; color:#9ca3af;">${t.tax || 0}</td>
+              <td style="text-align:right; font-weight:600;">${Math.round(t.total).toLocaleString()}</td>
+              <td style="color:#9ca3af; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${Utils.escapeHtml(t.note || '')}">${Utils.escapeHtml(t.note || '-')}</td>
+              <td>
+                <button class="btn-icon delete-trade-btn" data-id="${t.id}" 
+                  style="background:transparent; border:none; color:#6b7280; cursor:pointer; font-size:16px;"
+                  title="刪除">🗑️</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
     </div>
-  `).join('');
+  `;
 
   // 綁定刪除按鈕
-  $list.querySelectorAll('.delete-btn').forEach(btn => {
+  $list.querySelectorAll('.delete-trade-btn').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const id = parseInt(e.currentTarget.dataset.id);
-      if (confirm(`確定要刪除這筆交易嗎？`)) {
+      if (confirm('確定要刪除這筆交易嗎？')) {
         await TradeStore.deleteTrade(id);
         await refreshTradeList();
+        // 同時更新總覽卡片
+        if (window.AppController) {
+          await AppController.updateOverviewCards();
+        }
       }
     });
   });
 }
+
 
 // ─────────────────────────────────────
 // 🚀 啟動

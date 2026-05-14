@@ -10,36 +10,51 @@
  * ============================================================ */
 'use strict';
 
+// ============================================================
+// 🔧 取出 CONFIG 中的 key 名稱（容錯：兩種命名都支援）
+// ============================================================
+const _STORAGE_KEYS = (CONFIG.STORAGE_KEYS || CONFIG.STORAGE || {});
+const KEY_PORTFOLIO = _STORAGE_KEYS.PORTFOLIO || 'portfolio_v2';
+const KEY_HISTORY   = _STORAGE_KEYS.HISTORY   || 'portfolio_history_v2';
+const KEY_TOKEN     = _STORAGE_KEYS.TOKEN     || _STORAGE_KEYS.TOKEN_KEY    || 'gh_token';
+const KEY_GIST_ID   = _STORAGE_KEYS.GIST_ID   || _STORAGE_KEYS.GIST_ID_KEY  || 'gh_gist_id';
+const KEY_LAST_SYNC = _STORAGE_KEYS.LAST_SYNC || _STORAGE_KEYS.LAST_SYNC_KEY|| 'last_sync_at';
+
+const _API = (CONFIG.API || {});
+const API_BASE = _API.GITHUB_BASE || _API.BASE || 'https://api.github.com';
+const FILENAME_PORTFOLIO = _API.PORTFOLIO_FILENAME || _API.FILE_PORTFOLIO || 'portfolio.json';
+const FILENAME_HISTORY   = _API.HISTORY_FILENAME   || _API.FILE_HISTORY   || 'history.json';
+
 const Storage = {
   // ============================================================
   // 🔑 Token / Gist ID 管理
   // ============================================================
   getToken() {
-    try { return localStorage.getItem(CONFIG.STORAGE.TOKEN_KEY) || ''; }
+    try { return localStorage.getItem(KEY_TOKEN) || ''; }
     catch (e) { return ''; }
   },
   setToken(token) {
-    try { localStorage.setItem(CONFIG.STORAGE.TOKEN_KEY, token || ''); return true; }
+    try { localStorage.setItem(KEY_TOKEN, token || ''); return true; }
     catch (e) { console.error('[Storage] setToken 失敗:', e); return false; }
   },
   clearToken() {
-    try { localStorage.removeItem(CONFIG.STORAGE.TOKEN_KEY); return true; }
+    try { localStorage.removeItem(KEY_TOKEN); return true; }
     catch (e) { return false; }
   },
   getGistId() {
-    try { return localStorage.getItem(CONFIG.STORAGE.GIST_ID_KEY) || ''; }
+    try { return localStorage.getItem(KEY_GIST_ID) || ''; }
     catch (e) { return ''; }
   },
   setGistId(id) {
-    try { localStorage.setItem(CONFIG.STORAGE.GIST_ID_KEY, id || ''); return true; }
+    try { localStorage.setItem(KEY_GIST_ID, id || ''); return true; }
     catch (e) { return false; }
   },
   getLastSync() {
-    try { return localStorage.getItem(CONFIG.STORAGE.LAST_SYNC_KEY) || ''; }
+    try { return localStorage.getItem(KEY_LAST_SYNC) || ''; }
     catch (e) { return ''; }
   },
   setLastSync(iso) {
-    try { localStorage.setItem(CONFIG.STORAGE.LAST_SYNC_KEY, iso || new Date().toISOString()); return true; }
+    try { localStorage.setItem(KEY_LAST_SYNC, iso || new Date().toISOString()); return true; }
     catch (e) { return false; }
   },
 
@@ -48,7 +63,7 @@ const Storage = {
   // ============================================================
   loadLocal() {
     try {
-      const raw = localStorage.getItem(CONFIG.STORAGE.PORTFOLIO_KEY);
+      const raw = localStorage.getItem(KEY_PORTFOLIO);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       return parsed || null;
@@ -60,7 +75,7 @@ const Storage = {
   saveLocal(portfolio) {
     try {
       if (!portfolio) return false;
-      localStorage.setItem(CONFIG.STORAGE.PORTFOLIO_KEY, JSON.stringify(portfolio));
+      localStorage.setItem(KEY_PORTFOLIO, JSON.stringify(portfolio));
       return true;
     } catch (e) {
       console.error('[Storage] saveLocal 失敗:', e);
@@ -68,7 +83,7 @@ const Storage = {
     }
   },
   clearLocal() {
-    try { localStorage.removeItem(CONFIG.STORAGE.PORTFOLIO_KEY); return true; }
+    try { localStorage.removeItem(KEY_PORTFOLIO); return true; }
     catch (e) { return false; }
   },
 
@@ -77,7 +92,7 @@ const Storage = {
   // ============================================================
   loadLocalHistory() {
     try {
-      const raw = localStorage.getItem(CONFIG.STORAGE.HISTORY_KEY);
+      const raw = localStorage.getItem(KEY_HISTORY);
       if (!raw) return null;
       const parsed = JSON.parse(raw);
       return parsed || null;
@@ -89,7 +104,7 @@ const Storage = {
   saveLocalHistory(history) {
     try {
       if (!history) return false;
-      localStorage.setItem(CONFIG.STORAGE.HISTORY_KEY, JSON.stringify(history));
+      localStorage.setItem(KEY_HISTORY, JSON.stringify(history));
       return true;
     } catch (e) {
       console.error('[Storage] saveLocalHistory 失敗:', e);
@@ -97,7 +112,7 @@ const Storage = {
     }
   },
   clearLocalHistory() {
-    try { localStorage.removeItem(CONFIG.STORAGE.HISTORY_KEY); return true; }
+    try { localStorage.removeItem(KEY_HISTORY); return true; }
     catch (e) { return false; }
   },
 
@@ -110,7 +125,7 @@ const Storage = {
     if (!token) throw new Error('未設定 GitHub Token');
     if (!gistId) throw new Error('未設定 Gist ID');
 
-    const url = `${CONFIG.API.GITHUB_BASE}/gists/${gistId}`;
+    const url = `${API_BASE}/gists/${gistId}`;
     const resp = await fetch(url, {
       method: 'GET',
       headers: {
@@ -129,15 +144,15 @@ const Storage = {
 
     // 抓 portfolio.json
     let portfolio = null;
-    if (files[CONFIG.API.PORTFOLIO_FILENAME]?.content) {
-      try { portfolio = JSON.parse(files[CONFIG.API.PORTFOLIO_FILENAME].content); }
+    if (files[FILENAME_PORTFOLIO]?.content) {
+      try { portfolio = JSON.parse(files[FILENAME_PORTFOLIO].content); }
       catch (e) { console.error('[Storage] portfolio.json 解析失敗:', e); }
     }
 
     // 抓 history.json
     let history = null;
-    if (files[CONFIG.API.HISTORY_FILENAME]?.content) {
-      try { history = JSON.parse(files[CONFIG.API.HISTORY_FILENAME].content); }
+    if (files[FILENAME_HISTORY]?.content) {
+      try { history = JSON.parse(files[FILENAME_HISTORY].content); }
       catch (e) { console.error('[Storage] history.json 解析失敗:', e); }
     }
 
@@ -174,13 +189,13 @@ const Storage = {
 
     const files = {};
     if (portfolio) {
-      files[CONFIG.API.PORTFOLIO_FILENAME] = { content: JSON.stringify(portfolio, null, 2) };
+      files[FILENAME_PORTFOLIO] = { content: JSON.stringify(portfolio, null, 2) };
     }
     if (history) {
-      files[CONFIG.API.HISTORY_FILENAME] = { content: JSON.stringify(history, null, 2) };
+      files[FILENAME_HISTORY] = { content: JSON.stringify(history, null, 2) };
     }
 
-    const url = `${CONFIG.API.GITHUB_BASE}/gists/${gistId}`;
+    const url = `${API_BASE}/gists/${gistId}`;
     const resp = await fetch(url, {
       method: 'PATCH',
       headers: {
@@ -208,14 +223,14 @@ const Storage = {
     if (!token) throw new Error('未設定 GitHub Token');
 
     const files = {};
-    files[CONFIG.API.PORTFOLIO_FILENAME] = {
+    files[FILENAME_PORTFOLIO] = {
       content: JSON.stringify(portfolio || {}, null, 2)
     };
-    files[CONFIG.API.HISTORY_FILENAME] = {
+    files[FILENAME_HISTORY] = {
       content: JSON.stringify(history || {}, null, 2)
     };
 
-    const url = `${CONFIG.API.GITHUB_BASE}/gists`;
+    const url = `${API_BASE}/gists`;
     const resp = await fetch(url, {
       method: 'POST',
       headers: {

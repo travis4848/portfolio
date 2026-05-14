@@ -209,6 +209,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 </div>
 
 <!-- 模組載入（順序很重要） -->
+<!-- ↓↓↓ 在 12-app.js 之前插入 ↓↓↓ -->
 <script src="js/01-config.js"></script>
 <script src="js/02-utils.js"></script>
 <script src="js/03-data-structure.js"></script>
@@ -220,8 +221,10 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
 <script src="js/09-store.js"></script>
 <script src="js/10-form-modal.js"></script>
 <script src="js/11-trade-list.js"></script>
-<script src="js/12-app.js"></script>
 <script src="js/13-ui.js"></script>
+<script src="js/15-price-fetcher.js"></script>   <!-- ⭐ 新增 -->
+<script src="js/12-app.js"></script>             <!-- 12-app.js 一定要最後 -->
+
 
 <script>
   // 等所有模組就緒後啟動

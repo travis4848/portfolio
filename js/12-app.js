@@ -14,19 +14,23 @@ const App = {
   // ============================================================
   // 🚀 啟動
   // ============================================================
-  async boot() {
+async boot() {
     console.log('═══════════════════════════════════════');
     console.log('🚀 投資組合管理 v' + CONFIG.VERSION);
     console.log('═══════════════════════════════════════');
 
-    // 顯示載入中
     this._showLoading('正在載入資料...');
 
+    // ✅ 用 try-finally 確保 loading 一定會被移除
     try {
-      // 1. 初始化 Store
-      await Store.init({ tryCloud: true });
+      // 1. 初始化 Store（即使雲端失敗也不中斷）
+      try {
+        await Store.init({ tryCloud: true });
+      } catch (e) {
+        console.warn('[App] Store 初始化警告（繼續離線模式）:', e);
+      }
 
-      // 2. 訂閱狀態變化（自動重新渲染當前 tab）
+      // 2. 訂閱狀態變化
       Store.subscribe(() => {
         this._renderCurrentTab();
         this._updateSyncStatus();
@@ -39,16 +43,18 @@ const App = {
       this._renderCurrentTab();
       this._updateSyncStatus();
 
-      // 5. 移除載入中
-      this._hideLoading();
-
       console.log('✅ 啟動完成');
     } catch (err) {
       console.error('❌ 啟動失敗:', err);
-      this._hideLoading();
       this._showError('啟動失敗：' + err.message);
+    } finally {
+      // ✅ 不管成功失敗，都關閉 loading
+      this._hideLoading();
     }
   },
+
+
+
 
   // ============================================================
   // 🎨 UI 渲染

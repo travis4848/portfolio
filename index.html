@@ -2748,6 +2748,378 @@ const TradeCalculator = (() => {
 window.TradeCalculator = TradeCalculator;
 console.log('✅ TradeCalculator 已載入');
 
+// ============================================================
+// 💾 TradeStore - 交易紀錄資料管理（IndexedDB）
+// ============================================================
+// 功能：CRUD 交易紀錄、查詢、統計
+// 儲存：IndexedDB（本地瀏覽器，無上限）
+// 索引：date, code, market, type
+// ============================================================
+
+const TradeStore = (() => {
+
+  const DB_NAME = 'TradingJournalDB';
+  const DB_VERSION = 1;
+  const STORE_TRADES = 'trades';
+  const STORE_SETTINGS = 'settings';
+
+  let db = null;  // 連線實例
+
+  // ─────────────────────────────────────
+  // 🔌 1. 開啟資料庫
+  // ─────────────────────────────────────
+  function open() {
+    return new Promise((resolve, reject) => {
+      if (db) return resolve(db);
+
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+
+      req.onerror = (e) => {
+        console.error('❌ IndexedDB 開啟失敗', e);
+        reject(e.target.error);
+      };
+
+      req.onsuccess = (e) => {
+        db = e.target.result;
+        console.log('✅ TradeStore 連線成功');
+        resolve(db);
+      };
+
+      // 第一次或版本升級時建立 schema
+      req.onupgradeneeded = (e) => {
+        const _db = e.target.result;
+        console.log('🔧 建立 IndexedDB schema...');
+
+        // ── trades 交易紀錄表 ──
+        if (!_db.objectStoreNames.contains(STORE_TRADES)) {
+          const store = _db.createObjectStore(STORE_TRADES, {
+            keyPath: 'id',
+            autoIncrement: true
+          });
+          store.createIndex('date', 'date', { unique: false });
+          store.createIndex('code', 'code', { unique: false });
+          store.createIndex('market', 'market', { unique: false });
+          store.createIndex('type', 'type', { unique: false });
+          store.createIndex('code_date', ['code', 'date'], { unique: false });
+          console.log('  ✅ trades 表已建立');
+        }
+
+        // ── settings 設定表 ──
+        if (!_db.objectStoreNames.contains(STORE_SETTINGS)) {
+          _db.createObjectStore(STORE_SETTINGS, { keyPath: 'key' });
+          console.log('  ✅ settings 表已建立');
+        }
+      };
+    });
+  }
+
+  // ─────────────────────────────────────
+  // 🛠️ 內部工具：取得 transaction
+  // ─────────────────────────────────────
+  function _tx(storeName, mode = 'readonly') {
+    return db.transaction([storeName], mode).objectStore(storeName);
+  }
+
+  function _promisify(req) {
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  // ─────────────────────────────────────
+  // ➕ 2. 新增交易
+  // ─────────────────────────────────────
+  /**
+   * 新增一筆交易紀錄
+   * @param {Object} trade - 交易資料
+   * @returns {Promise<number>} 新增的 ID
+   */
+  async function addTrade(trade) {
+    await open();
+
+    // 補上預設欄位
+    const fullTrade = {
+      date: trade.date || new Date().toISOString().slice(0, 10),
+      code: trade.code,
+      name: trade.name || '',
+      market: trade.market || 'TW',
+      type: trade.type,                            // 'BUY' | 'SELL'
+      shares: Number(trade.shares) || 0,
+      price: Number(trade.price) || 0,
+      fee: Number(trade.fee) || 0,
+      tax: Number(trade.tax) || 0,
+      total: Number(trade.total) || 0,
+      isETF: Boolean(trade.isETF),
+      isRegularInvest: Boolean(trade.isRegularInvest),
+      feeDiscount: trade.feeDiscount ?? null,
+      note: trade.note || '',
+      tags: Array.isArray(trade.tags) ? trade.tags : [],
+      createdAt: new Date().toISOString()
+    };
+
+    // 驗證必填
+    if (!fullTrade.code) throw new Error('交易缺少股票代號');
+    if (!['BUY', 'SELL'].includes(fullTrade.type)) {
+      throw new Error('交易類型必須為 BUY 或 SELL');
+    }
+    if (fullTrade.shares <= 0) throw new Error('股數必須大於 0');
+    if (fullTrade.price <= 0) throw new Error('價格必須大於 0');
+
+    const req = _tx(STORE_TRADES, 'readwrite').add(fullTrade);
+    return await _promisify(req);
+  }
+
+  // ─────────────────────────────────────
+  // 📖 3. 讀取交易
+  // ─────────────────────────────────────
+  /** 取得單筆交易 */
+  async function getTrade(id) {
+    await open();
+    return await _promisify(_tx(STORE_TRADES).get(id));
+  }
+
+  /** 取得全部交易 */
+  async function getAllTrades() {
+    await open();
+    const trades = await _promisify(_tx(STORE_TRADES).getAll());
+    // 按日期排序（新→舊）
+    return trades.sort((a, b) => {
+      if (a.date !== b.date) return b.date.localeCompare(a.date);
+      return b.id - a.id;
+    });
+  }
+
+  /** 依股票代號取得交易 */
+  async function getTradesByCode(code) {
+    await open();
+    const idx = _tx(STORE_TRADES).index('code');
+    const trades = await _promisify(idx.getAll(code));
+    return trades.sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  /** 依市場取得交易 */
+  async function getTradesByMarket(market) {
+    await open();
+    const idx = _tx(STORE_TRADES).index('market');
+    return await _promisify(idx.getAll(market));
+  }
+
+  /** 依日期範圍取得交易 */
+  async function getTradesByDateRange(startDate, endDate) {
+    await open();
+    const idx = _tx(STORE_TRADES).index('date');
+    const range = IDBKeyRange.bound(startDate, endDate);
+    const trades = await _promisify(idx.getAll(range));
+    return trades.sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  // ─────────────────────────────────────
+  // ✏️ 4. 更新交易
+  // ─────────────────────────────────────
+  async function updateTrade(id, updates) {
+    await open();
+    const existing = await getTrade(id);
+    if (!existing) throw new Error(`交易 ID ${id} 不存在`);
+
+    const updated = {
+      ...existing,
+      ...updates,
+      id: existing.id,                          // 不允許改 ID
+      createdAt: existing.createdAt,            // 不允許改建立時間
+      updatedAt: new Date().toISOString()
+    };
+
+    const req = _tx(STORE_TRADES, 'readwrite').put(updated);
+    await _promisify(req);
+    return updated;
+  }
+
+  // ─────────────────────────────────────
+  // 🗑️ 5. 刪除交易
+  // ─────────────────────────────────────
+  async function deleteTrade(id) {
+    await open();
+    const req = _tx(STORE_TRADES, 'readwrite').delete(id);
+    return await _promisify(req);
+  }
+
+  /** 危險操作：清空所有交易 */
+  async function clearAllTrades() {
+    await open();
+    const req = _tx(STORE_TRADES, 'readwrite').clear();
+    return await _promisify(req);
+  }
+
+  // ─────────────────────────────────────
+  // 📊 6. 持倉計算（從交易紀錄推算）
+  // ─────────────────────────────────────
+  /**
+   * 根據交易紀錄計算當前各檔股票持倉
+   * @returns {Promise<Array>} 持倉陣列
+   *   [{ code, name, market, shares, totalCost, avgCost, isETF }, ...]
+   */
+  async function calculatePositions() {
+    const trades = await getAllTrades();
+    const positions = {};
+
+    // 按日期升序處理（先買後賣）
+    trades.sort((a, b) => a.date.localeCompare(b.date));
+
+    trades.forEach(t => {
+      const key = `${t.market}_${t.code}`;
+      if (!positions[key]) {
+        positions[key] = {
+          code: t.code,
+          name: t.name,
+          market: t.market,
+          isETF: t.isETF,
+          shares: 0,
+          totalCost: 0,         // 累計成本（含費用）
+          totalAmount: 0,       // 累計金額（不含費用）
+          buyShares: 0,         // 累計買入股數
+          realizedPnL: 0,       // 已實現損益
+          trades: []
+        };
+      }
+
+      const pos = positions[key];
+      pos.trades.push(t);
+
+      if (t.type === 'BUY') {
+        pos.shares += t.shares;
+        pos.totalCost += t.total;
+        pos.totalAmount += t.shares * t.price;
+        pos.buyShares += t.shares;
+      } else if (t.type === 'SELL') {
+        // 賣出：按平均成本扣除
+        const avgCost = pos.shares > 0 ? pos.totalCost / pos.shares : 0;
+        const sellShares = Math.min(t.shares, pos.shares);
+        const costBasis = avgCost * sellShares;
+
+        // 賣出實收 = total（已含手續費和稅）
+        const sellNet = t.total;
+        pos.realizedPnL += (sellNet - costBasis);
+
+        // 扣除股數和成本
+        pos.shares -= sellShares;
+        pos.totalCost -= costBasis;
+        pos.totalAmount -= (pos.totalAmount / (pos.shares + sellShares)) * sellShares;
+      }
+    });
+
+    // 算出最終平均成本，過濾掉已清倉的
+    return Object.values(positions)
+      .filter(p => p.shares > 0 || p.realizedPnL !== 0)
+      .map(p => ({
+        ...p,
+        avgCost: p.shares > 0 ? Number((p.totalCost / p.shares).toFixed(4)) : 0,
+        avgPrice: p.shares > 0 ? Number((p.totalAmount / p.shares).toFixed(4)) : 0,
+        totalCost: Number(p.totalCost.toFixed(2)),
+        realizedPnL: Number(p.realizedPnL.toFixed(2))
+      }));
+  }
+
+  // ─────────────────────────────────────
+  // ⚙️ 7. 設定值（settings 表）
+  // ─────────────────────────────────────
+  async function setSetting(key, value) {
+    await open();
+    const req = _tx(STORE_SETTINGS, 'readwrite').put({ key, value });
+    return await _promisify(req);
+  }
+
+  async function getSetting(key, defaultValue = null) {
+    await open();
+    const result = await _promisify(_tx(STORE_SETTINGS).get(key));
+    return result ? result.value : defaultValue;
+  }
+
+  // ─────────────────────────────────────
+  // 📥📤 8. 匯出 / 匯入（備份用）
+  // ─────────────────────────────────────
+  async function exportAll() {
+    const trades = await getAllTrades();
+    return {
+      version: DB_VERSION,
+      exportedAt: new Date().toISOString(),
+      tradeCount: trades.length,
+      trades: trades
+    };
+  }
+
+  async function importAll(data, mode = 'append') {
+    if (!data || !Array.isArray(data.trades)) {
+      throw new Error('匯入資料格式錯誤');
+    }
+    if (mode === 'replace') {
+      await clearAllTrades();
+    }
+    let imported = 0;
+    for (const t of data.trades) {
+      const { id, ...rest } = t;  // 移除 id 讓 DB 重新生成
+      await addTrade(rest);
+      imported++;
+    }
+    return imported;
+  }
+
+  // ─────────────────────────────────────
+  // 📊 9. 統計
+  // ─────────────────────────────────────
+  async function getStats() {
+    const trades = await getAllTrades();
+    const buyCount = trades.filter(t => t.type === 'BUY').length;
+    const sellCount = trades.filter(t => t.type === 'SELL').length;
+    const codes = new Set(trades.map(t => `${t.market}_${t.code}`));
+
+    return {
+      totalTrades: trades.length,
+      buyCount,
+      sellCount,
+      uniqueStocks: codes.size,
+      firstTradeDate: trades.length > 0
+        ? trades[trades.length - 1].date
+        : null,
+      lastTradeDate: trades.length > 0
+        ? trades[0].date
+        : null
+    };
+  }
+
+  // ─────────────────────────────────────
+  // 🌐 對外 API
+  // ─────────────────────────────────────
+  return {
+    open,
+    // CRUD
+    addTrade,
+    getTrade,
+    getAllTrades,
+    getTradesByCode,
+    getTradesByMarket,
+    getTradesByDateRange,
+    updateTrade,
+    deleteTrade,
+    clearAllTrades,
+    // 持倉
+    calculatePositions,
+    // 設定
+    setSetting,
+    getSetting,
+    // 匯出入
+    exportAll,
+    importAll,
+    // 統計
+    getStats
+  };
+})();
+
+window.TradeStore = TradeStore;
+console.log('✅ TradeStore 已載入');
+
+// 自動開啟資料庫
+TradeStore.open().catch(err => console.error('TradeStore 開啟失敗:', err));
 
 
 

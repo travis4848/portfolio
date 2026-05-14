@@ -1255,6 +1255,83 @@ body {
   .tf-row { grid-template-columns: 1fr; }
 }
 
+
+/* ═══════════════════════════════════════════════════════════
+   🎨 槓桿徽章 + 持股總覽區塊
+   ═══════════════════════════════════════════════════════════ */
+
+/* 槓桿徽章 */
+.leverage-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+}
+
+.leverage-badge.leverage-1x {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.leverage-badge.leverage-2x {
+    background: rgba(251, 146, 60, 0.15);
+    color: #fb923c;
+    border: 1px solid rgba(251, 146, 60, 0.3);
+}
+
+.leverage-badge.leverage-3x {
+    background: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+/* 持股總覽 - 三區塊 */
+.overview-block {
+    background: var(--bg-secondary, #1f2937);
+    border: 1px solid var(--border-color, #374151);
+    border-radius: 12px;
+    margin-bottom: 16px;
+    overflow: hidden;
+}
+
+.overview-block-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 18px;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid var(--border-color, #374151);
+}
+
+.overview-block-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text-primary, #e5e7eb);
+}
+
+.overview-block-body {
+    padding: 16px 18px;
+}
+
+/* 小型空狀態 */
+.empty-state-small {
+    text-align: center;
+    color: var(--text-tertiary, #6b7280);
+    padding: 24px 0;
+    font-size: 0.9rem;
+}
+
+/* section-header 內部 div 排版微調 */
+.section-header > div:first-child h2 {
+    margin-bottom: 0;
+}
+   
+   
+   
 </style>
 </head>
 <body>
@@ -1336,49 +1413,134 @@ body {
 <!-- 分頁導航 -->
 <nav class="tab-nav">
     <button class="tab-btn active" data-tab="stocks">📈 持股</button>
-    <button class="tab-btn" data-tab="trades">📝 交易</button>
-    <button class="tab-btn" data-tab="futures">📉 期貨</button>
+    <button class="tab-btn" data-tab="trades-stock">📊 個股</button>
+    <button class="tab-btn" data-tab="trades-margin">💳 融資</button>
+    <button class="tab-btn" data-tab="trades-futures">📉 期貨</button>
     <button class="tab-btn" data-tab="watchlist">👁️ 觀察清單</button>
     <button class="tab-btn" data-tab="settings">⚙️ 設定</button>
 </nav>
+
     
-<!-- 持股分頁 -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- 📈 持股分頁（彙總總覽 - 之後填內容）                      -->
+<!-- ═══════════════════════════════════════════════════════════ -->
 <section class="tab-content active" id="tab-stocks">
     <div class="section-header">
-        <h2 class="section-title">我的持股</h2>
+        <h2 class="section-title">📈 我的持股總覽</h2>
         <span style="color: var(--text-tertiary); font-size: 0.85rem;">
-            💡 持股自動從交易紀錄計算
+            💡 自動從交易紀錄計算
         </span>
     </div>
-    <div id="stocksContainer"></div>
-</section>
 
-<!-- 📝 交易分頁（新增） -->
-<section class="tab-content" id="tab-trades">
-    <div class="section-header">
-        <h2 class="section-title">交易紀錄</h2>
-        <button class="btn btn-primary" id="addTradeBtn">＋ 新增交易</button>
+    <!-- 三區塊預留（Phase D 填渲染邏輯） -->
+    <div id="overviewStocksBlock" class="overview-block">
+        <div class="overview-block-header">
+            <h3>📊 現股部位</h3>
+            <span class="leverage-badge leverage-1x">槓桿 1.0x</span>
+        </div>
+        <div class="overview-block-body" id="overviewStocksBody">
+            <div class="empty-state-small">尚無現股部位</div>
+        </div>
     </div>
-    <div id="tradeListContainer"></div>
+
+    <div id="overviewMarginBlock" class="overview-block">
+        <div class="overview-block-header">
+            <h3>💳 融資部位</h3>
+            <span class="leverage-badge leverage-2x">槓桿 2.5x</span>
+        </div>
+        <div class="overview-block-body" id="overviewMarginBody">
+            <div class="empty-state-small">尚無融資部位</div>
+        </div>
+    </div>
+
+    <div id="overviewFuturesBlock" class="overview-block">
+        <div class="overview-block-header">
+            <h3>📉 期貨部位</h3>
+            <span class="leverage-badge leverage-3x">槓桿 ~7-24x</span>
+        </div>
+        <div class="overview-block-body" id="overviewFuturesBody">
+            <div class="empty-state-small">尚無期貨部位</div>
+        </div>
+    </div>
 </section>
 
-<!-- 期貨分頁 -->
-<section class="tab-content" id="tab-futures">
-        <div class="section-header">
-            <h2 class="section-title">期貨部位</h2>
-            <button class="btn btn-primary" id="addFuturesBtn">＋ 新增部位</button>
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- 📊 個股分頁（現股交易紀錄）                                -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="tab-content" id="tab-trades-stock">
+    <div class="section-header">
+        <div>
+            <h2 class="section-title">📊 個股交易紀錄</h2>
+            <span class="leverage-badge leverage-1x" style="margin-top:6px; display:inline-block;">槓桿 1.0x（全額交易）</span>
         </div>
-        <div id="futuresContainer"></div>
-    </section>
-    
-    <!-- 觀察清單分頁 -->
-    <section class="tab-content" id="tab-watchlist">
-        <div class="section-header">
-            <h2 class="section-title">觀察清單</h2>
-            <button class="btn btn-primary" id="addWatchBtn">＋ 新增標的</button>
+        <button class="btn btn-primary" id="addStockTradeBtn">＋ 新增交易</button>
+    </div>
+    <div id="stockTradeListContainer"></div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- 💳 融資分頁（融資交易紀錄）                                -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="tab-content" id="tab-trades-margin">
+    <div class="section-header">
+        <div>
+            <h2 class="section-title">💳 融資交易紀錄</h2>
+            <span class="leverage-badge leverage-2x" style="margin-top:6px; display:inline-block;">槓桿 2.5x（自備款 40%）</span>
         </div>
-        <div id="watchlistContainer"></div>
-    </section>
+        <button class="btn btn-primary" id="addMarginTradeBtn">＋ 新增交易</button>
+    </div>
+    <div id="marginTradeListContainer">
+        <div class="empty-state">
+            <div class="empty-state-icon">🚧</div>
+            <div class="empty-state-text">融資交易功能開發中（Phase C）</div>
+            <div style="color: var(--text-tertiary); font-size: 0.85rem; margin-top: 8px;">
+                預計支援：融資買進 / 融資賣出、自備款計算、融資利息
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- 📉 期貨分頁（台指期 + 個股期）                             -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="tab-content" id="tab-trades-futures">
+    <div class="section-header">
+        <div>
+            <h2 class="section-title">📉 期貨交易紀錄</h2>
+            <span class="leverage-badge leverage-3x" style="margin-top:6px; display:inline-block;">槓桿 ~7-24x（依商品而定）</span>
+        </div>
+        <div style="display:flex; gap:8px;">
+            <button class="btn btn-secondary" id="marginSettingsBtn" title="調整保證金">⚙️ 保證金設定</button>
+            <button class="btn btn-primary" id="addFuturesTradeBtn">＋ 新增交易</button>
+        </div>
+    </div>
+    <div id="futuresTradeListContainer">
+        <div class="empty-state">
+            <div class="empty-state-icon">🚧</div>
+            <div class="empty-state-text">期貨交易功能開發中（Phase C）</div>
+            <div style="color: var(--text-tertiary); font-size: 0.85rem; margin-top: 8px;">
+                預計支援：台指期 (TXF / MXF)、個股期 (STF)、多空雙向、保證金計算
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- 👁️ 觀察清單分頁                                            -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<section class="tab-content" id="tab-watchlist">
+    <div class="section-header">
+        <h2 class="section-title">👁️ 觀察清單</h2>
+        <button class="btn btn-primary" id="addWatchBtn">＋ 加入觀察</button>
+    </div>
+    <div id="watchlistContainer">
+        <div class="empty-state">
+            <div class="empty-state-icon">🚧</div>
+            <div class="empty-state-text">觀察清單功能開發中</div>
+        </div>
+    </div>
+</section>
+
     
     <!-- 設定分頁 -->
     <section class="tab-content" id="tab-settings">
@@ -3803,13 +3965,38 @@ const TradeFormModal = (() => {
     // 提交按鈕
     $btnSubmit.addEventListener('click', submit);
 
-    // 綁定「＋ 新增交易」按鈕（在「📝 交易」分頁內）
-    const $btnAddTrade = document.getElementById('addTradeBtn');
-    if ($btnAddTrade) {
-      $btnAddTrade.addEventListener('click', () => open('BUY'));
+    // 綁定「📊 個股」分頁的「＋新增交易」按鈕
+    const $btnAddStock = document.getElementById('addStockTradeBtn');
+    if ($btnAddStock) {
+      $btnAddStock.addEventListener('click', () => open('BUY'));
+    }
+
+    // 💳 融資分頁的「＋新增交易」（暫時提示開發中）
+    const $btnAddMargin = document.getElementById('addMarginTradeBtn');
+    if ($btnAddMargin) {
+      $btnAddMargin.addEventListener('click', () => {
+        alert('🚧 融資交易功能開發中（Phase C）');
+      });
+    }
+
+    // 📉 期貨分頁的「＋新增交易」（暫時提示開發中）
+    const $btnAddFutures = document.getElementById('addFuturesTradeBtn');
+    if ($btnAddFutures) {
+      $btnAddFutures.addEventListener('click', () => {
+        alert('🚧 期貨交易功能開發中（Phase C）');
+      });
+    }
+
+    // 期貨保證金設定按鈕
+    const $btnMarginSettings = document.getElementById('marginSettingsBtn');
+    if ($btnMarginSettings) {
+      $btnMarginSettings.addEventListener('click', () => {
+        alert('🚧 保證金設定功能開發中（Phase C）');
+      });
     }
 
     console.log('✅ TradeFormModal 已初始化');
+
   }
 
   // ─────────────────────────────────────
@@ -4184,9 +4371,10 @@ const TradeFormModal = (() => {
 // 📋 交易列表（顯示在「📝 交易」分頁）
 // ─────────────────────────────────────
 async function refreshTradeList() {
-  // 改用新的容器 ID
-  const $list = document.getElementById('tradeListContainer');
+  // 個股分頁的容器
+  const $list = document.getElementById('stockTradeListContainer');
   if (!$list) return;
+
 
   const trades = await TradeStore.getAllTrades();
   
@@ -4195,9 +4383,10 @@ async function refreshTradeList() {
       <div class="empty-state">
         <div class="empty-state-icon">📭</div>
         <div class="empty-state-text">尚無交易紀錄</div>
-        <button class="btn btn-primary" onclick="document.getElementById('addTradeBtn').click()">
+          <button class="btn btn-primary" onclick="document.getElementById('addStockTradeBtn').click()">
           ＋ 新增第一筆交易
         </button>
+
       </div>
     `;
     return;

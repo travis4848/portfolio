@@ -1,283 +1,261 @@
 /* ============================================================
- * 📦 03-data-structure.js - 資料結構工廠 + 遷移工具
- * ============================================================
- * 用途：
- *   1. DataStructure：建立各種資料物件的工廠方法
- *   2. Migration：v1 → v2 自動升級
- * 依賴：CONFIG, Utils
- * 對外：DataStructure, Migration（全域變數）
+ * 03-data-structure.js — v3 資料結構 + 遷移
  * ============================================================ */
 'use strict';
 
-// ============================================================
-// 📦 資料結構工具 - 預設資料
-// ============================================================
 const DataStructure = {
-  // 預設主資料
-  getDefaultPortfolio() {
-    return {
-      version: CONFIG.VERSION,
-      lastUpdate: new Date().toISOString(),
-      stocks: [],
-      margin: [],
-      futures: [],
-      watchlist: [],
-      settings: {
-        autoFetchPrice: true,
-        fetchInterval: 60000,
-        onlyMarketHours: true,
-        defaultMarginRate: 0.6,
-        defaultInterestRate: 0.06,
-        theme: 'dark',
-        currency: 'TWD',
-        language: 'zh-TW'
-      }
-    };
-  },
 
-  // 預設歷史資料
-  getDefaultHistory() {
+  // ========== 建立空的 v3 結構 ==========
+  createEmpty() {
     return {
-      version: CONFIG.VERSION,
-      snapshots: [],
-      transactions: []
-    };
-  },
+      version: '3.0.0',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
 
-  // 建立空 stock 物件
-  createStock(symbol, name, market = 'TW') {
-    return {
-      id: Utils.uid('stk'),
-      symbol: symbol,
-      name: name,
-      market: market,
-      industry: '',
-      lots: [],
-      currentPrice: 0,
-      lastPriceUpdate: null,
-      realizedPnl: 0,
-      tRollingProfit: 0
-    };
-  },
-
-  // 建立 lot
-  createStockLot(shares, cost, date = null, fee = 0, note = '') {
-    return {
-      id: Utils.uid('lot'),
-      shares: Number(shares) || 0,
-      cost: Number(cost) || 0,
-      date: date || Utils.today(),
-      fee: Number(fee) || 0,
-      note: note || ''
-    };
-  },
-
-  // 建立融資 lot
-  createMarginLot(shares, cost, marginRate, interestRate, date, fee, note) {
-    const total = shares * cost;
-    const ownFund = total * (1 - marginRate);
-    const marginLoan = total * marginRate;
-    return {
-      id: Utils.uid('lot'),
-      shares: Number(shares) || 0,
-      cost: Number(cost) || 0,
-      date: date || Utils.today(),
-      marginRate: Number(marginRate) || 0.6,
-      ownFund: ownFund,
-      marginLoan: marginLoan,
-      interestRate: Number(interestRate) || 0.06,
-      fee: Number(fee) || 0,
-      note: note || ''
-    };
-  },
-
-  // 建立期貨 lot
-  createFuturesLot(direction, contracts, entryPrice, margin, contractSize, date, fee, note) {
-    return {
-      id: Utils.uid('lot'),
-      direction: direction || 'long',
-      contracts: Number(contracts) || 0,
-      entryPrice: Number(entryPrice) || 0,
-      margin: Number(margin) || 0,
-      contractSize: Number(contractSize) || 200,
-      date: date || Utils.today(),
-      fee: Number(fee) || 0,
-      note: note || ''
-    };
-  },
-
-  // 建立交易紀錄
-  createTransaction(type, category, symbol, name, shares, price, options = {}) {
-    return {
-      id: Utils.uid('tx'),
-      timestamp: new Date().toISOString(),
-      type: type,
-      category: category,
-      symbol: symbol,
-      name: name || '',
-      shares: Number(shares) || 0,
-      price: Number(price) || 0,
-      amount: (Number(shares) || 0) * (Number(price) || 0),
-      fee: Number(options.fee) || 0,
-      tax: Number(options.tax) || 0,
-      realizedPnl: Number(options.realizedPnl) || 0,
-      relatedLotIds: options.relatedLotIds || [],
-      note: options.note || ''
-    };
-  },
-
-  // 建立每日快照
-  createSnapshot(stats) {
-    return {
-      date: Utils.today(),
-      timestamp: new Date().toISOString(),
-      totalAssets: stats.totalAssets || 0,
-      totalCost: stats.totalCost || 0,
-      totalPnl: stats.totalPnl || 0,
-      pnlPct: stats.pnlPct || 0,
-      breakdown: {
-        stocks: stats.breakdown?.stocks || 0,
-        margin: stats.breakdown?.margin || 0,
-        futures: stats.breakdown?.futures || 0,
-        cash: stats.breakdown?.cash || 0
+      // 📈 現股
+      stocks: {
+        holdings: {},     // { ticker: { lots: [], avgCost, trueAvgCost, currentPrice, ... } }
+        trades: [],
+        realizedPL: 0
       },
-      positionsCount: stats.positionsCount || 0,
-      realizedPnlAccum: stats.realizedPnlAccum || 0
+
+      // 💳 融資融券
+      margin: {
+        holdings: {},     // { ticker: { type:'long'|'short', lots, ... } }
+        trades: [],
+        realizedPL: 0,
+        // 使用者設定（可覆蓋 CONFIG.MARGIN）
+        settings: {
+          marginRate: 0.4,
+          shortRate: 0.9,
+          interestRate: 0.0645,
+          shortFeeRate: 0.0008,
+          brokerName: '國泰證券'
+        }
+      },
+
+      // 📊 期貨
+      futures: {
+        holdings: {},     // { contract: { product, type, lots, ... } }
+        trades: [],
+        realizedPL: 0
+      },
+
+      // 🔄 做 T 紀錄
+      tTrades: [],
+
+      // 📸 快照
+      snapshots: []
     };
-  }
-};
-
-// ============================================================
-// 🔄 v1 → v2 遷移工具
-// ============================================================
-const Migration = {
-  // 檢查是否為 v1 格式
-  isV1(data) {
-    if (!data) return false;
-    if (data.version === '2.0.0') return false;
-    // v1 通常沒有 version 或為 1.x
-    if (!data.version || data.version.startsWith('1.')) return true;
-    // 或者 stocks 結構是舊的（沒有 lots）
-    if (Array.isArray(data.stocks) && data.stocks.length > 0) {
-      const first = data.stocks[0];
-      if (first && !Array.isArray(first.lots)) return true;
-    }
-    return false;
   },
 
-  // 執行遷移
-  migrate(oldData) {
-    console.log('[Migration] 開始 v1 → v2 遷移...');
-    const newData = DataStructure.getDefaultPortfolio();
-    
-    try {
-      // 遷移現股
-      if (Array.isArray(oldData.stocks)) {
-        newData.stocks = oldData.stocks.map(s => this.migrateStock(s));
-      }
-      
-      // 遷移期貨
-      if (Array.isArray(oldData.futures)) {
-        newData.futures = oldData.futures.map(f => this.migrateFutures(f));
-      }
-      
-      // 遷移觀察清單
-      if (Array.isArray(oldData.watchlist)) {
-        newData.watchlist = oldData.watchlist.map(w => ({
-          id: w.id || Utils.uid('wl'),
-          symbol: w.symbol || '',
-          name: w.name || '',
-          market: w.market || 'TW',
-          currentPrice: Number(w.currentPrice) || 0,
-          addedDate: w.addedDate || new Date().toISOString(),
-          note: w.note || ''
-        }));
-      }
-      
-      // 遷移設定
-      if (oldData.settings) {
-        Object.assign(newData.settings, oldData.settings);
-      }
-      
-      console.log('[Migration] ✅ 遷移完成');
-      return newData;
-    } catch (err) {
-      console.error('[Migration] ❌ 遷移失敗:', err);
-      throw new Error(`資料遷移失敗：${err.message}`);
-    }
+  // ========== 建立空的 lot（FIFO 用） ==========
+  createLot(date, shares, price, fee = 0) {
+    return {
+      id: this._uuid(),
+      date: date,
+      shares: shares,
+      price: price,
+      fee: fee,
+      remaining: shares,    // 剩餘股數（FIFO 賣出時遞減）
+      createdAt: new Date().toISOString()
+    };
   },
 
-  // 遷移單一現股
-  migrateStock(old) {
-    const stock = DataStructure.createStock(
-      old.symbol || '',
-      old.name || '',
-      old.market || 'TW'
-    );
-    stock.industry = old.industry || '';
-    stock.currentPrice = Number(old.currentPrice) || 0;
-    stock.lastPriceUpdate = old.lastPriceUpdate || null;
-    stock.realizedPnl = Number(old.realizedPnl) || 0;
-    
-    // 把舊的 shares + avgCost 轉成單一 lot
-    if (old.shares && old.avgCost) {
-      stock.lots.push(DataStructure.createStockLot(
-        old.shares,
-        old.avgCost,
-        old.buyDate || old.date || Utils.today(),
-        old.fee || 0,
-        old.note || ''
-      ));
-    } else if (Array.isArray(old.lots)) {
-      // 已經是新格式（部分升級）
-      stock.lots = old.lots.map(l => ({
-        id: l.id || Utils.uid('lot'),
-        shares: Number(l.shares) || 0,
-        cost: Number(l.cost) || 0,
-        date: l.date || Utils.today(),
-        fee: Number(l.fee) || 0,
-        note: l.note || ''
+  // ========== 建立空的 holding ==========
+  createHolding(ticker) {
+    return {
+      ticker: ticker,
+      lots: [],
+      avgCost: 0,           // 加權平均成本
+      trueAvgCost: 0,       // 做 T 後的真實成本 ⭐
+      currentPrice: 0,      // 即時價
+      priceUpdatedAt: null,
+      totalRealizedPL: 0    // 此檔已實現損益
+    };
+  },
+
+  // ========== 建立融資券 holding ==========
+  createMarginHolding(ticker, type) {
+    return {
+      ticker: ticker,
+      type: type,           // 'long' = 融資, 'short' = 融券
+      lots: [],
+      avgCost: 0,
+      trueAvgCost: 0,
+      currentPrice: 0,
+      priceUpdatedAt: null,
+      totalRealizedPL: 0,
+      // 融資專用
+      loanAmount: 0,        // 融資金額
+      // 融券專用
+      depositAmount: 0      // 保證金
+    };
+  },
+
+  // ========== 建立期貨 holding ==========
+  createFuturesHolding(contract, product, type) {
+    return {
+      contract: contract,         // 例如 "TXF202506"
+      product: product,           // 例如 "TXF"
+      type: type,                 // 'long' / 'short'
+      lots: [],
+      avgPrice: 0,
+      currentPrice: 0,
+      priceUpdatedAt: null,
+      totalRealizedPL: 0,
+      marginUsed: 0               // 使用保證金
+    };
+  },
+
+  // ========== 主遷移入口 ==========
+  migrate(data) {
+    if (!data) {
+      console.log('[Migration] 無資料，建立全新 v3 結構');
+      return this.createEmpty();
+    }
+
+    const ver = data.version || '1.0.0';
+    console.log(`[Migration] 開始 ${ver} → 3.0.0 遷移...`);
+
+    let result = data;
+
+    // v1 → v2
+    if (ver.startsWith('1.')) {
+      result = this._migrateV1toV2(result);
+    }
+
+    // v2 → v3
+    if ((result.version || '').startsWith('2.')) {
+      result = this._migrateV2toV3(result);
+    }
+
+    // 已是 v3 但補欄位
+    if ((result.version || '').startsWith('3.')) {
+      result = this._ensureV3Fields(result);
+    }
+
+    console.log('[Migration] ✅ 遷移完成');
+    return result;
+  },
+
+  // ========== v1 → v2 ==========
+  _migrateV1toV2(v1) {
+    const v2 = {
+      version: '2.0.0',
+      portfolio: {
+        holdings: {},
+        trades: [],
+        realizedPL: 0,
+        snapshots: []
+      }
+    };
+
+    if (Array.isArray(v1.trades)) v2.portfolio.trades = v1.trades;
+    if (v1.holdings) v2.portfolio.holdings = v1.holdings;
+    if (typeof v1.realizedPL === 'number') v2.portfolio.realizedPL = v1.realizedPL;
+    if (Array.isArray(v1.snapshots)) v2.portfolio.snapshots = v1.snapshots;
+
+    return v2;
+  },
+
+  // ========== v2 → v3 ==========
+  _migrateV2toV3(v2) {
+    console.log('[Migration] v2 → v3 開始（將現股拆出，新增融資券/期貨）');
+
+    const v3 = this.createEmpty();
+    const oldP = v2.portfolio || v2;
+
+    // 現股遷移
+    if (oldP.holdings) {
+      Object.keys(oldP.holdings).forEach(ticker => {
+        const old = oldP.holdings[ticker] || {};
+        const h = this.createHolding(ticker);
+        h.avgCost = old.avgCost || 0;
+        h.trueAvgCost = old.avgCost || 0;
+        h.currentPrice = old.currentPrice || old.avgCost || 0;
+        // 用舊資料合成一個 lot（避免 FIFO 缺失）
+        if ((old.shares || 0) > 0) {
+          h.lots.push({
+            id: this._uuid(),
+            date: old.firstBuyDate || new Date().toISOString().slice(0, 10),
+            shares: old.shares,
+            price: old.avgCost || 0,
+            fee: 0,
+            remaining: old.shares,
+            createdAt: new Date().toISOString(),
+            note: '由 v2 遷移合併'
+          });
+        }
+        v3.stocks.holdings[ticker] = h;
+      });
+    }
+
+    if (Array.isArray(oldP.trades)) {
+      v3.stocks.trades = oldP.trades.map(t => ({
+        ...t,
+        market: 'stocks'
       }));
     }
-    
-    return stock;
+    if (typeof oldP.realizedPL === 'number') {
+      v3.stocks.realizedPL = oldP.realizedPL;
+    }
+    if (Array.isArray(oldP.snapshots)) {
+      v3.snapshots = oldP.snapshots;
+    }
+
+    return v3;
   },
 
-  // 遷移單一期貨
-  migrateFutures(old) {
-    const fut = {
-      id: old.id || Utils.uid('fut'),
-      symbol: old.symbol || '',
-      name: old.name || '',
-      productType: old.productType || 'TXF',
-      lots: [],
-      currentPrice: Number(old.currentPrice) || 0,
-      lastPriceUpdate: old.lastPriceUpdate || null,
-      realizedPnl: Number(old.realizedPnl) || 0
-    };
-    
-    // 舊格式單筆 → 一個 lot
-    if (old.contracts !== undefined && old.entryPrice !== undefined) {
-      fut.lots.push(DataStructure.createFuturesLot(
-        old.direction || 'long',
-        old.contracts,
-        old.entryPrice,
-        old.margin || 0,
-        old.contractSize || 200,
-        old.date || Utils.today(),
-        old.fee || 0,
-        old.note || ''
-      ));
-    } else if (Array.isArray(old.lots)) {
-      fut.lots = old.lots;
-    }
-    
-    return fut;
+  // ========== 確保 v3 欄位齊全（防止舊版 v3 缺欄位） ==========
+  _ensureV3Fields(v3) {
+    const empty = this.createEmpty();
+
+    // 補頂層
+    ['stocks', 'margin', 'futures'].forEach(market => {
+      if (!v3[market]) v3[market] = empty[market];
+      if (!v3[market].holdings) v3[market].holdings = {};
+      if (!Array.isArray(v3[market].trades)) v3[market].trades = [];
+      if (typeof v3[market].realizedPL !== 'number') v3[market].realizedPL = 0;
+    });
+
+    if (!v3.margin.settings) v3.margin.settings = empty.margin.settings;
+    if (!Array.isArray(v3.tTrades)) v3.tTrades = [];
+    if (!Array.isArray(v3.snapshots)) v3.snapshots = [];
+
+    // 補每個 holding 的欄位
+    ['stocks', 'margin', 'futures'].forEach(market => {
+      Object.keys(v3[market].holdings).forEach(key => {
+        const h = v3[market].holdings[key];
+        if (!Array.isArray(h.lots)) h.lots = [];
+        if (typeof h.avgCost !== 'number') h.avgCost = 0;
+        if (typeof h.trueAvgCost !== 'number') h.trueAvgCost = h.avgCost;
+        if (typeof h.currentPrice !== 'number') h.currentPrice = h.avgCost;
+      });
+    });
+
+    v3.version = '3.0.0';
+    v3.updatedAt = new Date().toISOString();
+    return v3;
+  },
+
+  // ========== 工具：UUID ==========
+  _uuid() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  },
+
+  // ========== 驗證 ==========
+  validate(data) {
+    if (!data || typeof data !== 'object') return false;
+    if (!data.version) return false;
+    if (!data.stocks || !data.margin || !data.futures) return false;
+    return true;
   }
 };
 
-// 全域曝露
 window.DataStructure = DataStructure;
-window.Migration = Migration;
-
-console.log('[03-data-structure.js] ✅ DataStructure + Migration 已載入');
+console.log('[03-data-structure.js] ✅ DataStructure + Migration 已載入 (v3)');

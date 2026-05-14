@@ -295,6 +295,258 @@ const Store = {
         return { stock, transaction: tx, realizedPnl: result.realizedPnl };
       }
       
+            // ============================================================
+      // 💎 融資 / 融券
+      // ============================================================
+      case 'MARGIN_BUY': {
+        // payload: { symbol, name, type, shares, price, fee, date, note }
+        // type: 'long' = 融資買進, 'short' = 融券賣出
+        const p = action.payload;
+        const stocks = portfolio.margin || [];
+        let stock = stocks.find(s => s.symbol === p.symbol && s.type === p.type);
+
+        if (!stock) {
+          stock = DataStructure.createMargin(p.symbol, p.name || p.symbol, p.type, 'TW');
+          stocks.push(stock);
+        }
+
+        // 計算融資借款 / 融券保證金
+        const cfg = (CONFIG.MARGIN_CONFIG && CONFIG.MARGIN_CONFIG[p.type === 'long' ? 'long' : 'short']) || {};
+        const subtotal = p.shares * p.price;
+        const fee = Number(p.fee || 0);
+        let loanAmount = 0;
+        let depositAmount = 0;
+        let shortFee = 0;
+        let effectiveCost = p.price;
+
+        if (p.type === 'long') {
+          // 融資：借 60%，自備 40%
+          loanAmount = subtotal * (cfg.loanRate || 0.6);
+          stock.loanAmount += loanAmount;
+          effectiveCost = (subtotal + fee) / p.shares;  // 含手續費
+        } else {
+          // 融券：保證金 90% + 借券費 0.08%
+          depositAmount = subtotal * (cfg.depositRate || 0.9);
+          shortFee = subtotal * (cfg.feeRate || 0.0008);
+          stock.depositAmount += depositAmount;
+          stock.shortFee += shortFee;
+          effectiveCost = (subtotal - fee - shortFee) / p.shares; // 賣空進帳
+        }
+
+        // 加 lot
+        stock.lots.push(DataStructure.createLot(
+          p.date || new Date().toISOString().slice(0, 10),
+          p.shares,
+          p.price,
+          { effectiveCost, fee, note: p.note || '' }
+        ));
+
+        // 加交易紀錄
+        history.transactions.push(DataStructure.createTransaction(
+          p.type === 'long' ? 'MARGIN_BUY' : 'SHORT_SELL',
+          'margin',
+          p.symbol,
+          p.name,
+          p.shares,
+          p.price,
+          { fee, tax: 0, note: p.note || '' }
+        ));
+
+        return { portfolio: { ...portfolio, margin: stocks }, history };
+      }
+
+      case 'MARGIN_SELL': {
+        // payload: { id, shares, price, fee, date, note }
+        // 融資：賣出平倉   /   融券：買回回補
+        const p = action.payload;
+        const stocks = portfolio.margin || [];
+        const stock = stocks.find(s => s.id === p.id);
+        if (!stock) {
+          console.warn('[Store] MARGIN_SELL: 找不到', p.id);
+          return { portfolio, history };
+        }
+
+        // FIFO 平倉
+        const sellInfo = Calculator.calcSell({
+          shares: p.shares,
+          price: p.price,
+          discount: portfolio.settings?.brokerFeeDiscount || 0.28,
+          isETF: false
+        });
+        const result = Calculator.applySell({
+          existingLots: stock.lots,
+          sharesToSell: p.shares,
+          sellInfo
+        });
+
+        stock.lots = result.remainingLots;
+        stock.realizedPnl += result.realizedPnl;
+
+        // 釋放融資金額 / 退還保證金
+        const closeRatio = p.shares / Math.max(1, stock.lots.reduce((s,l) => s + (l.shares||0), p.shares));
+        if (stock.type === 'long') {
+          stock.loanAmount = Math.max(0, stock.loanAmount * (1 - closeRatio));
+        } else {
+          stock.depositAmount = Math.max(0, stock.depositAmount * (1 - closeRatio));
+        }
+
+        history.transactions.push(DataStructure.createTransaction(
+          stock.type === 'long' ? 'MARGIN_SELL' : 'SHORT_COVER',
+          'margin',
+          stock.symbol,
+          stock.name,
+          p.shares,
+          p.price,
+          { fee: p.fee || 0, tax: sellInfo.tax, realizedPnl: result.realizedPnl, note: p.note || '' }
+        ));
+
+        return { portfolio: { ...portfolio, margin: stocks }, history };
+      }
+
+      // ============================================================
+      // 📈 期貨
+      // ============================================================
+      case 'FUTURES_OPEN': {
+        // payload: { product, contract, name, direction, contracts, price, fee, date, note, underlyingSymbol }
+        const p = action.payload;
+        const futures = portfolio.futures || [];
+        let pos = futures.find(f =>
+          f.product === p.product &&
+          f.contract === p.contract &&
+          f.direction === p.direction
+        );
+
+        const productCfg = CONFIG.FUTURES_CONFIG?.products?.[p.product] || {};
+        const fee = p.fee != null ? Number(p.fee) : (productCfg.feePerLot || 30) * p.contracts;
+
+        // 計算保證金
+        let marginNeeded = 0;
+        if (productCfg.category === 'index') {
+          marginNeeded = (productCfg.margin || 0) * p.contracts;
+        } else if (productCfg.category === 'stock') {
+          // 個股期：標的價 × 契約規模 × 保證金比率
+          const notional = (p.price || 0) * (productCfg.contractSize || 2000);
+          marginNeeded = notional * (productCfg.marginRate || 0.135) * p.contracts;
+        }
+
+        if (!pos) {
+          pos = DataStructure.createFutures(
+            p.product, p.contract, p.name || p.contract,
+            p.direction, p.underlyingSymbol || ''
+          );
+          futures.push(pos);
+        }
+
+        // 加 lot
+        pos.lots.push(DataStructure.createFuturesLot(
+          p.date || new Date().toISOString().slice(0, 10),
+          p.contracts,
+          p.price,
+          { fee, margin: marginNeeded, note: p.note || '' }
+        ));
+
+        // 重算加權平均進場價
+        let totalCon = 0, totalNotion = 0;
+        pos.lots.forEach(l => {
+          const c = Number(l.remaining ?? l.contracts) || 0;
+          totalCon += c;
+          totalNotion += c * (Number(l.price) || 0);
+        });
+        pos.totalContracts = totalCon;
+        pos.avgPrice = totalCon > 0 ? totalNotion / totalCon : 0;
+        pos.marginUsed += marginNeeded;
+
+        history.transactions.push(DataStructure.createTransaction(
+          p.direction === 'long' ? 'FUT_LONG_OPEN' : 'FUT_SHORT_OPEN',
+          'futures',
+          p.contract,
+          p.name,
+          p.contracts,
+          p.price,
+          { fee, tax: 0, note: p.note || '', product: p.product }
+        ));
+
+        return { portfolio: { ...portfolio, futures }, history };
+      }
+
+      case 'FUTURES_CLOSE': {
+        // payload: { id, contracts, price, fee, date, note }
+        const p = action.payload;
+        const futures = portfolio.futures || [];
+        const pos = futures.find(f => f.id === p.id);
+        if (!pos) {
+          console.warn('[Store] FUTURES_CLOSE: 找不到', p.id);
+          return { portfolio, history };
+        }
+
+        const productCfg = CONFIG.FUTURES_CONFIG?.products?.[pos.product] || {};
+        const pointValue = productCfg.pointValue || (productCfg.contractSize || 2000);
+        const fee = p.fee != null ? Number(p.fee) : (productCfg.feePerLot || 30) * p.contracts;
+
+        // FIFO 平倉
+        let remainingToClose = Number(p.contracts) || 0;
+        let totalPnl = 0;
+        let releasedMargin = 0;
+
+        const sortedLots = [...pos.lots].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        const newLots = [];
+
+        sortedLots.forEach(lot => {
+          const lotCons = Number(lot.remaining ?? lot.contracts) || 0;
+          if (remainingToClose <= 0 || lotCons <= 0) {
+            newLots.push(lot);
+            return;
+          }
+          const close = Math.min(lotCons, remainingToClose);
+          // 點數差 × 一點價值（多單：現價>進價賺；空單：現價<進價賺）
+          const points = pos.direction === 'long' 
+            ? (p.price - lot.price) 
+            : (lot.price - p.price);
+          totalPnl += points * pointValue * close;
+          // 釋放保證金（按比例）
+          if (lotCons > 0) {
+            releasedMargin += (Number(lot.margin) || 0) * (close / lotCons);
+          }
+          remainingToClose -= close;
+          newLots.push({
+            ...lot,
+            remaining: lotCons - close,
+            margin: (Number(lot.margin) || 0) * ((lotCons - close) / Math.max(lotCons, 1))
+          });
+        });
+
+        // 扣手續費和稅
+        const tax = (p.contracts * p.price * pointValue) * (productCfg.taxRate || 0.00002);
+        totalPnl -= (fee + tax);
+
+        pos.lots = newLots;
+        pos.realizedPnl += totalPnl;
+        pos.marginUsed = Math.max(0, pos.marginUsed - releasedMargin);
+
+        // 重算 totalContracts / avgPrice
+        let totalCon = 0, totalNotion = 0;
+        pos.lots.forEach(l => {
+          const c = Number(l.remaining ?? l.contracts) || 0;
+          totalCon += c;
+          totalNotion += c * (Number(l.price) || 0);
+        });
+        pos.totalContracts = totalCon;
+        pos.avgPrice = totalCon > 0 ? totalNotion / totalCon : 0;
+
+        history.transactions.push(DataStructure.createTransaction(
+          pos.direction === 'long' ? 'FUT_LONG_CLOSE' : 'FUT_SHORT_CLOSE',
+          'futures',
+          pos.contract,
+          pos.name,
+          p.contracts,
+          p.price,
+          { fee, tax, realizedPnl: totalPnl, note: p.note || '', product: pos.product }
+        ));
+
+        return { portfolio: { ...portfolio, futures }, history };
+      }
+
+
       case 'STOCK_UPDATE_PRICE': {
         // payload: { symbol, price }
         const stock = this.getStockBySymbol(payload.symbol);

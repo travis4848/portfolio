@@ -30,24 +30,112 @@ const CONFIG = {
 
   // ========== 融資券設定（可在 UI 修改） ==========
   MARGIN: {
-    MARGIN_RATE: 0.4,               // 融資自備款比例
-    SHORT_RATE: 0.9,                // 融券保證金比例
+    // 沿用舊欄位（相容既有程式）
+    MARGIN_RATE: 0.4,               // 融資自備款比例（舊名）
+    SHORT_RATE: 0.9,                // 融券保證金比例（舊名）
     INTEREST_RATE: 0.0645,          // 融資年利率（國泰 6.45%）
     SHORT_FEE_RATE: 0.0008,         // 融券手續費率
-    BROKER_NAME: '國泰證券'
+    BROKER_NAME: '國泰證券',
+
+    // 新增：結構化欄位（reducer 用）
+    LONG: {
+      OWN_FUND_RATE: 0.4,           // 自備款 40%
+      LOAN_RATE: 0.6,               // 融資借 60%
+      INTEREST_RATE: 0.0645,        // 融資利率
+      MAINTENANCE_RATE: 1.30        // 維持率（低於 130% 警告）
+    },
+    SHORT: {
+      DEPOSIT_RATE: 0.9,            // 保證金 90%
+      FEE_RATE: 0.0008,             // 借券費 0.08%
+      MAINTENANCE_RATE: 1.30
+    }
   },
 
   // ========== 期貨設定 ==========
   FUTURES: {
     PRODUCTS: {
-      'TXF': { name: '台指期',   multiplier: 200, margin: 207000, unit: '點' },
-      'MXF': { name: '小台指',   multiplier: 50,  margin: 51750,  unit: '點' },
-      'TMF': { name: '微型台指', multiplier: 10,  margin: 10350,  unit: '點' }
-      // 個股期動態加入：股票代號-FUT，如 "2330-FUT"
+      // ── 指數期貨 ──
+      'TXF': {
+        name: '台指期（大台）',
+        category: 'index',
+        multiplier: 200,           // 一點 = $200
+        pointValue: 200,           // 別名（給 reducer 用）
+        margin: 207000,            // 原始保證金（最新公告）
+        marginMaintain: 159000,    // 維持保證金
+        tickSize: 1,
+        unit: '點',
+        feePerLot: 50,             // 單邊手續費
+        taxRate: 0.00002,          // 期交稅 0.002%
+        underlying: 'TWII'
+      },
+      'MXF': {
+        name: '小台指（小台）',
+        category: 'index',
+        multiplier: 50,
+        pointValue: 50,
+        margin: 51750,
+        marginMaintain: 39750,
+        tickSize: 1,
+        unit: '點',
+        feePerLot: 30,
+        taxRate: 0.00002,
+        underlying: 'TWII'
+      },
+      'TMF': {
+        name: '微型台指（微台）',  // ⭐
+        category: 'index',
+        multiplier: 10,
+        pointValue: 10,
+        margin: 10350,
+        marginMaintain: 7950,
+        tickSize: 1,
+        unit: '點',
+        feePerLot: 15,
+        taxRate: 0.00002,
+        underlying: 'TWII'
+      }
+      // 個股期/小型個股期：動態建立（用 STF / MTF 樣板，見下方）
     },
-    STOCK_FUT_MULTIPLIER: 2000,     // 個股期 1 口 = 2000 股
-    STOCK_FUT_MARGIN_RATE: 0.135    // 個股期保證金比例 13.5%
+
+    // ── 個股期樣板（建立倉位時依股價算保證金）──
+    STOCK_FUT_TEMPLATES: {
+      'STF': {                       // 一般個股期
+        name: '個股期貨',
+        category: 'stock',
+        contractSize: 2000,          // 1 口 = 2000 股
+        marginRate: 0.135,           // 13.5%
+        marginRateMaintain: 0.103,   // 10.3%
+        feePerLot: 30,
+        taxRate: 0.00002,
+        dynamicMargin: true
+      },
+      'MTF': {                       // 小型個股期 ⭐
+        name: '小型個股期貨',
+        category: 'stock',
+        contractSize: 100,           // 1 口 = 100 股
+        marginRate: 0.135,
+        marginRateMaintain: 0.103,
+        feePerLot: 15,
+        taxRate: 0.00002,
+        dynamicMargin: true
+      }
+    },
+
+    // ── 舊欄位（相容既有程式）──
+    STOCK_FUT_MULTIPLIER: 2000,
+    STOCK_FUT_MARGIN_RATE: 0.135,
+
+    // 預設商品
+    DEFAULT_PRODUCT: 'TXF',
+
+    // Yahoo 報價代號對應（D3 用）
+    YAHOO_SYMBOL: {
+      'TXF': '%5ETWII',   // ^TWII 加權指數
+      'MXF': '%5ETWII',
+      'TMF': '%5ETWII'
+    }
   },
+
 
   // ========== 做 T 自動辨識 ==========
   T_TRADE: {
@@ -77,7 +165,10 @@ const CONFIG = {
 // 凍結部分（避免誤改），但允許 MARGIN 和 FUTURES 在執行時被使用者設定覆蓋
 Object.freeze(CONFIG.PRICE);
 Object.freeze(CONFIG.UI);
-Object.freeze(CONFIG.FEE.PRODUCTS || {});
+Object.freeze(CONFIG.FEE);
+// MARGIN / FUTURES 故意不凍結（允許使用者在 UI 修改）
+Object.freeze(CONFIG.FUTURES.PRODUCTS);
+Object.freeze(CONFIG.FUTURES.STOCK_FUT_TEMPLATES);
 
 window.CONFIG = CONFIG;
 console.log(`[01-config.js] ✅ CONFIG 已載入 v${CONFIG.VERSION}`);

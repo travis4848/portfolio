@@ -84,45 +84,60 @@ const DataStructure = {
     };
   },
 
-  // ========== 建立融資/融券 ==========
-  createMargin(symbol, name = '', type = 'long') {
+  // ========== 建立融資/融券持股 ==========
+  // type: 'long' = 融資, 'short' = 融券
+  createMargin(symbol, name = '', type = 'long', market = 'TW') {
+    const isLong = type === 'long';
     return {
       id: this._uid('mg'),
       symbol: String(symbol).toUpperCase(),
       name: name,
-      type: type,                    // 'long' = 融資, 'short' = 融券
-      market: 'TW',
+      type: type,
+      market: market,
       lots: [],
       currentPrice: 0,
       lastPriceUpdate: null,
       realizedPnl: 0,
       trueAvgCost: 0,
-      // 融資專用
-      loanAmount: 0,                 // 融資借款金額
-      // 融券專用
-      depositAmount: 0,              // 融券保證金
+
+      // ── 融資專用 ──
+      loanAmount: 0,           // 累計融資借款
+      
+      // ── 融券專用 ──
+      depositAmount: 0,        // 累計保證金
+      shortFee: 0,             // 累計借券費
+      
+      // ── 共用 ──
+      interestAccrued: 0,      // 累計利息（融資每天計算）
+      lastInterestDate: null,  // 上次計息日（避免重複計算）
+      
       createdDate: new Date().toISOString()
     };
   },
 
-  // ========== 建立期貨 ==========
-  createFutures(contract, product, name = '', type = 'long') {
+
+  // ========== 建立期貨倉位 ==========
+  // product: 'TXF' | 'MXF' | 'TMF' | 'STF' | 'MTF'
+  // direction: 'long' | 'short'
+  createFutures(product, contract, name = '', direction = 'long', underlyingSymbol = '') {
     return {
       id: this._uid('fut'),
-      contract: contract,            // 例如 "TXF202506"、"2330-FUT"
-      product: product,              // 'TXF' | 'MXF' | 'TMF' | 'STOCK_FUT'
+      product: product,                  // 商品代號
+      contract: contract,                // 合約代號（如 TXF202506）
       name: name,
-      type: type,                    // 'long' / 'short'
-      lots: [],                      // [{id, date, lots數, price, fee}]
+      direction: direction,
+      underlyingSymbol: underlyingSymbol, // 個股期才用（標的股票代號）
+      lots: [],                          // [{id, date, contracts, price, fee, ...}]
       currentPrice: 0,
       lastPriceUpdate: null,
       realizedPnl: 0,
-      avgPrice: 0,
-      marginUsed: 0,
-      multiplier: 200,               // 大台 200、小台 50、微台 10、個股期 2000
+      avgPrice: 0,                       // 加權平均進場價
+      totalContracts: 0,                 // 持有口數（多正空負或都正？這裡都用正數，方向看 direction）
+      marginUsed: 0,                     // 已使用保證金
       createdDate: new Date().toISOString()
     };
   },
+
 
   // ========== 建立 lot（FIFO 用）==========
   createLot(date, shares, price, opts = {}) {
@@ -163,18 +178,21 @@ const DataStructure = {
   },
 
   // ========== 別名：createFutureLot ==========
-  createFutureLot(contracts, price, date, fee = 0, note = '') {
+  createFuturesLot(date, contracts, price, opts = {}) {
     return {
       id: this._uid('flot'),
-      date: date || new Date().toISOString().slice(0, 10),
-      contracts: Number(contracts),
-      remaining: Number(contracts),
-      price: Number(price),
-      fee: Number(fee || 0),
-      note: note || '',
+      date: date,
+      contracts: Number(contracts),       // 開倉口數
+      remaining: Number(contracts),       // 剩餘口數（FIFO 平倉）
+      price: Number(price),               // 進場價
+      fee: Number(opts.fee || 0),
+      tax: Number(opts.tax || 0),
+      margin: Number(opts.margin || 0),   // 此筆佔用的保證金
+      note: opts.note || '',
       createdAt: new Date().toISOString()
     };
   },
+
 
   // ========== 建立 transaction（歷史紀錄）==========
   createTransaction(action, market, symbol, name, shares, price, extra = {}) {

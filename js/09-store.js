@@ -605,7 +605,37 @@ const Store = {
         stock.lastPriceUpdate = new Date().toISOString();
         return stock;
       }
-      
+
+      // 🆕 ===== 加在這裡開始 =====
+      case 'MARGIN_UPDATE_PRICE': {
+        // payload: { symbol, price }
+        // 同代號可能同時有「融資 long」和「融券 short」兩個 position → 都要更新
+        const symbol = String(payload.symbol).toUpperCase();
+        const list = this.state.portfolio.margin || [];
+        const price = Number(payload.price) || 0;
+        let updated = 0;
+        list.forEach(p => {
+          if (String(p.symbol).toUpperCase() === symbol) {
+            p.currentPrice = price;
+            p.lastPriceUpdate = new Date().toISOString();
+            updated++;
+          }
+        });
+        return updated > 0 ? { symbol, price, updated } : null;
+      }
+
+      case 'FUTURES_UPDATE_PRICE': {
+        // payload: { id, price }（用 id 精確指定，因為期貨同商品多月份/方向）
+        // 預留給未來 Phase D 自動報價用，目前手動輸入也走這個 action 比較統一
+        const list = this.state.portfolio.futures || [];
+        const pos = list.find(f => f.id === payload.id);
+        if (!pos) return null;
+        pos.currentPrice = Number(payload.price) || 0;
+        pos.lastPriceUpdate = new Date().toISOString();
+        return pos;
+      }
+      // 🆕 ===== 加到這裡結束 =====
+
       case 'STOCK_DELETE_LOT': {
         // payload: { symbol, lotId }
         const stock = this.getStockBySymbol(payload.symbol);

@@ -179,77 +179,75 @@ const PriceFetcher = {
   },
 
   // ========== 刷新 Store 中所有持股 ==========
+  // 範圍：現股 + 融資券 + 觀察清單（同一個 symbol 只抓一次，多目標共用價格）
+  // 期貨：暫不自動更新（用手動輸入 ✏️）—Phase D 後續再處理
   async refreshAll() {
     if (!window.Store) {
       console.warn('[PriceFetcher] Store 未載入');
-      return;
-    }
-
-    const portfolio = Store.getPortfolio();
-    if (!portfolio) return;
-
-    // 蒐集所有要更新的代號（去重）
-    const tasks = [];
-    const seen = new Set();
-
-    // 現股
-    (portfolio.stocks || []).forEach(s => {
-      const key = `${s.symbol}|${s.market || 'TW'}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        tasks.push({ symbol: s.symbol, market: s.market || 'TW', target: 'stock' });
-      }
-    });
-
-    // 融資券
-    (portfolio.margin || []).forEach(s => {
-      const key = `${s.symbol}|${s.market || 'TW'}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        tasks.push({ symbol: s.symbol, market: s.market || 'TW', target: 'margin' });
-      }
-    });
-
-    // 期貨（暫時跳過，Phase D 再處理特殊邏輯）
-    // (portfolio.futures || []).forEach(...)
-
-    // 觀察清單
-    (portfolio.watchlist || []).forEach(s => {
-      const key = `${s.symbol}|${s.market || 'TW'}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        tasks.push({ symbol: s.symbol, market: s.market || 'TW', target: 'watchlist' });
-      }
-    });
-
-    if (tasks.length === 0) {
-      console.log('[PriceFetcher] 沒有持股需要更新');
       return { updated: 0, failed: 0 };
     }
 
-    console.log(`[PriceFetcher] 準備更新 ${tasks.length} 檔報價...`);
+    const portfolio = Store.getPortfolio();
+    if (!portfolio) return { updated: 0, failed: 0 };
 
+    // === Step 1: 蒐集要抓的代號（去重）+ 記錄各目標位置 ===
+    // 結構：{ "2330|TW": { symbol, market, targets: ['stock','margin'] } }
+    const symbolMap = new Map();
+
+    const addTask = (symbol, market, target) => {
+      if (!symbol) return;
+      const key = `${String(symbol).toUpperCase()}|${market || 'TW'}`;
+      if (!symbolMap.has(key)) {
+        symbolMap.set(key, {
+          symbol,
+          market: market || 'TW',
+          targets: new Set()
+        });
+      }
+      symbolMap.get(key).targets.add(target);
+    };
+
+    (portfolio.stocks    || []).forEach(s => addTask(s.symbol, s.market, 'stock'));
+    (portfolio.margin    || []).forEach(s => addTask(s.symbol, s.market, 'margin'));
+    (portfolio.watchlist || []).forEach(s => addTask(s.symbol, s.market, 'watchlist'));
+    // 期貨故意不加 → 用手動輸入
+
+    if (symbolMap.size === 0) {
+      console.log('[PriceFetcher] 沒有部位需要更新');
+      return { updated: 0, failed: 0 };
+    }
+
+    console.log(`[PriceFetcher] 準備更新 ${symbolMap.size} 檔報價...`);
+
+    // === Step 2: 逐一抓取 + 分發到所有目標 ===
     let updated = 0;
     let failed = 0;
 
-    // 同步抓取（避免一次塞太多 Proxy 請求）
-    for (const t of tasks) {
+    for (const [key, task] of symbolMap) {
       try {
-        const result = await this.fetchOne(t.symbol, t.market);
+        const result = await this.fetchOne(task.symbol, task.market);
+        const price = result.price;
 
-        // 更新到 Store
-        if (t.target === 'stock') {
-          Store.dispatch({
-            type: 'STOCK_UPDATE_PRICE',
-            payload: { symbol: t.symbol, price: result.price }
-          });
-        } else {
-          // margin / watchlist：直接改物件（Store 暫時沒對應 action，下批做）
-          this._directUpdate(t.target, t.symbol, result.price);
+        // 同一個 symbol 可能同時是現股 & 融資券 → 都要更新
+        for (const target of task.targets) {
+          if (target === 'stock') {
+            Store.dispatch({
+              type: 'STOCK_UPDATE_PRICE',
+              payload: { symbol: task.symbol, price }
+            });
+          } else if (target === 'margin') {
+            Store.dispatch({
+              type: 'MARGIN_UPDATE_PRICE',
+              payload: { symbol: task.symbol, price }
+            });
+          } else if (target === 'watchlist') {
+            // watchlist 暫無對應 action → 用 _directUpdate（不影響核心資料）
+            this._directUpdate('watchlist', task.symbol, price);
+          }
         }
         updated++;
       } catch (e) {
-        console.warn(`[PriceFetcher] ${t.symbol} 更新失敗:`, e.message);
+        console.warn(`[PriceFetcher] ${task.symbol} 更新失敗:`, e.message);
         failed++;
       }
     }
@@ -257,6 +255,7 @@ const PriceFetcher = {
     console.log(`[PriceFetcher] ✅ 更新完成：${updated} 成功, ${failed} 失敗`);
     return { updated, failed };
   },
+
 
   // ========== 內部：直接更新（用於暫時沒對應 action 的市場）==========
   _directUpdate(target, symbol, price) {

@@ -270,15 +270,32 @@ const UI = {
     try {
       this.toast(`🔄 抓取 ${symbol}...`, 'success');
       const r = await PriceFetcher.fetchOne(symbol, market, { useCache: false });
-      Store.dispatch({
-        type: 'STOCK_UPDATE_PRICE',
-        payload: { symbol, price: r.price }
-      });
+
+      // 同步更新現股 & 融資券（同 symbol 兩邊都改）
+      const hasStock  = Store.getStocks().some(s => 
+        String(s.symbol).toUpperCase() === String(symbol).toUpperCase());
+      const hasMargin = (Store.getMargin() || []).some(p => 
+        String(p.symbol).toUpperCase() === String(symbol).toUpperCase());
+
+      if (hasStock) {
+        Store.dispatch({
+          type: 'STOCK_UPDATE_PRICE',
+          payload: { symbol, price: r.price }
+        });
+      }
+      if (hasMargin) {
+        Store.dispatch({
+          type: 'MARGIN_UPDATE_PRICE',
+          payload: { symbol, price: r.price }
+        });
+      }
+
       this.toast(`✅ ${symbol}: ${r.price.toFixed(2)}`, 'success');
     } catch (e) {
       this.toast(`❌ ${symbol}: ${e.message}`, 'error');
     }
   },
+
 
   // ============================================================
   // 即時報價：刷新全部

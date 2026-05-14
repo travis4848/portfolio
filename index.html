@@ -138,6 +138,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   .form-row{grid-template-columns:1fr}
   .stat-grid{grid-template-columns:repeat(2,1fr)}
 }
+.muted{color:#6e7681}
+.small{font-size:11px}
 </style>
 </head>
 <body>
@@ -166,6 +168,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
   <!-- Tabs -->
   <nav class="tabs">
     <button class="tab active" data-tab="holdings">📊 持股</button>
+    <button class="tab" data-tab="margin">💎 融資券</button>
+    <button class="tab" data-tab="futures">📈 期貨</button>
     <button class="tab" data-tab="trades">📋 交易紀錄</button>
     <button class="tab" data-tab="stats">📈 統計</button>
     <button class="tab" data-tab="settings">⚙️ 設定</button>
@@ -184,6 +188,28 @@ td.num{text-align:right;font-variant-numeric:tabular-nums}
         <button class="btn btn-secondary" id="btnUpdatePrice">💲 更新報價</button>
       </div>
       <div id="holdingsList"></div>
+    </section>
+  
+      <!-- Tab: 融資券 -->
+    <section class="tab-panel" id="tab-margin">
+      <div class="stat-grid" id="marginStatGrid"></div>
+      <div class="action-bar">
+        <button class="btn btn-success" id="btnMarginBuy">🛒 融資買進 / 融券賣出</button>
+        <button class="btn btn-danger" id="btnMarginSell">💰 平倉 / 回補</button>
+        <button class="btn btn-secondary" id="btnUpdatePriceMargin">💲 更新報價</button>
+      </div>
+      <div id="marginList"></div>
+    </section>
+
+    <!-- Tab: 期貨 -->
+    <section class="tab-panel" id="tab-futures">
+      <div class="stat-grid" id="futuresStatGrid"></div>
+      <div class="action-bar">
+        <button class="btn btn-success" id="btnFuturesOpen">🛒 開倉</button>
+        <button class="btn btn-danger" id="btnFuturesClose">💰 平倉</button>
+        <button class="btn btn-secondary" id="btnUpdatePriceFutures">💲 更新報價</button>
+      </div>
+      <div id="futuresList"></div>
     </section>
 
     <!-- Tab: 交易 -->

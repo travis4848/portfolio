@@ -61,7 +61,18 @@ const UI = {
     $('btnSell2')?.addEventListener('click', () => this.openSellModal());
     $('btnSnapshot')?.addEventListener('click', () => this.takeSnapshot());
     $('btnUpdatePrice')?.addEventListener('click', () => this.refreshAllPrices());
+
+    // ⭐ 新增：融資券
+    $('btnMarginBuy')?.addEventListener('click', () => this.openMarginBuyModal());
+    $('btnMarginSell')?.addEventListener('click', () => this.openMarginSellModal());
+    $('btnUpdatePriceMargin')?.addEventListener('click', () => this.refreshAllPrices());
+
+    // ⭐ 新增：期貨
+    $('btnFuturesOpen')?.addEventListener('click', () => this.openFuturesOpenModal());
+    $('btnFuturesClose')?.addEventListener('click', () => this.openFuturesCloseModal());
+    $('btnUpdatePriceFutures')?.addEventListener('click', () => this.refreshAllPrices());
   },
+
 
   // ============================================================
   // 渲染分發
@@ -75,6 +86,8 @@ const UI = {
     try {
       switch (this.currentTab) {
         case 'holdings': this.renderHoldings(); break;
+        case 'margin':   this.renderMargin();   break;   // ⭐ 新增
+        case 'futures':  this.renderFutures();  break;   // ⭐ 新增
         case 'trades':   this.renderTrades();   break;
         case 'stats':    this.renderStats();    break;
         case 'settings': this.renderSettings(); break;
@@ -83,6 +96,7 @@ const UI = {
       console.error('[UI] 渲染失敗:', e);
     }
   },
+
 
   // ============================================================
   // 同步狀態徽章
@@ -315,6 +329,378 @@ const UI = {
       payload: { symbol, price }
     });
     this.toast(`✅ ${symbol} → ${price}`, 'success');
+  },
+
+    // ============================================================
+  // 💎 融資券 Tab
+  // ============================================================
+  renderMargin() {
+    const list = Store.getMargin() || [];
+    const stats = this._calcMarginStats(list);
+
+    // ----- 統計卡片 -----
+    const grid = document.getElementById('marginStatGrid');
+    if (grid) {
+      grid.innerHTML = `
+        <div class="stat-card">
+          <div class="stat-label">融資市值</div>
+          <div class="stat-value">${this._fmt(stats.longValue)}</div>
+          <div class="stat-sub">融資金額 ${this._fmt(stats.totalLoan)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">融券市值</div>
+          <div class="stat-value">${this._fmt(stats.shortValue)}</div>
+          <div class="stat-sub">保證金 ${this._fmt(stats.totalDeposit)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">未實現損益</div>
+          <div class="stat-value ${stats.unrealizedPL >= 0 ? 'up' : 'down'}">
+            ${stats.unrealizedPL >= 0 ? '+' : ''}${this._fmt(stats.unrealizedPL)}
+          </div>
+          <div class="stat-sub ${stats.unrealizedPLPct >= 0 ? 'up' : 'down'}">
+            ${stats.unrealizedPLPct >= 0 ? '+' : ''}${(stats.unrealizedPLPct || 0).toFixed(2)}%
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">已實現損益</div>
+          <div class="stat-value ${stats.realizedPL >= 0 ? 'up' : 'down'}">
+            ${stats.realizedPL >= 0 ? '+' : ''}${this._fmt(stats.realizedPL)}
+          </div>
+        </div>
+      `;
+    }
+
+    // ----- 列表 -----
+    const wrap = document.getElementById('marginList');
+    if (!wrap) return;
+
+    if (list.length === 0) {
+      wrap.innerHTML = `
+        <div class="empty">
+          <div class="empty-icon">💎</div>
+          <div class="empty-text">尚無融資/融券部位</div>
+          <div class="empty-hint">點擊「🛒 融資買進」開始</div>
+        </div>`;
+      return;
+    }
+
+    let rows = '';
+    list.forEach(pos => {
+      const totalShares = (pos.lots || []).reduce(
+        (s, l) => s + (l.remaining ?? l.shares ?? 0), 0);
+      if (totalShares <= 0) return;
+
+      // 加權平均成本
+      let totalCost = 0;
+      (pos.lots || []).forEach(l => {
+        const sh = l.remaining ?? l.shares ?? 0;
+        const ec = l.effectiveCost ?? l.price ?? 0;
+        totalCost += sh * ec;
+      });
+      const avgCost = totalShares > 0 ? totalCost / totalShares : 0;
+      const curPrice = pos.currentPrice || avgCost;
+      const value = totalShares * curPrice;
+
+      // 損益（融資 vs 融券方向相反）
+      const pl = pos.type === 'long'
+        ? (value - totalCost)
+        : (totalCost - value);
+      const plPct = totalCost > 0 ? (pl / totalCost) * 100 : 0;
+
+      // 自備款 / 維持率
+      const ownFund = pos.type === 'long'
+        ? (totalCost - (pos.loanAmount || 0))   // 自備款
+        : (pos.depositAmount || 0);              // 保證金
+
+      // 維持率（簡化版）：(市值 + 保證金) / (融資金額 or 市值)
+      let maintainPct = 0;
+      if (pos.type === 'long' && pos.loanAmount > 0) {
+        maintainPct = (value / pos.loanAmount) * 100;
+      } else if (pos.type === 'short' && value > 0) {
+        maintainPct = ((pos.depositAmount || 0) + value) / value * 100;
+      }
+      const maintainClass = maintainPct >= 130 ? 'up' : 'down';
+
+      const typeLabel = pos.type === 'long'
+        ? '<span class="up">融資</span>'
+        : '<span class="down">融券</span>';
+
+      const priceTimeStr = pos.lastPriceUpdate
+        ? this._timeAgo(pos.lastPriceUpdate)
+        : '<span class="muted">未更新</span>';
+
+      rows += `
+        <tr>
+          <td class="ticker-cell">
+            <strong>${pos.symbol}</strong>
+            <span class="ticker-name">${pos.name || ''}</span>
+          </td>
+          <td>${typeLabel}</td>
+          <td class="num">${this._fmt(totalShares)}</td>
+          <td class="num">${avgCost.toFixed(2)}</td>
+          <td class="num">
+            ${curPrice.toFixed(2)}
+            <div class="muted small">${priceTimeStr}</div>
+          </td>
+          <td class="num">${this._fmt(value)}</td>
+          <td class="num">${this._fmt(ownFund)}</td>
+          <td class="num ${maintainClass}">${maintainPct.toFixed(0)}%</td>
+          <td class="num ${pl >= 0 ? 'up' : 'down'}">
+            ${pl >= 0 ? '+' : ''}${this._fmt(pl)}
+            <div class="small ${plPct >= 0 ? 'up' : 'down'}">
+              ${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%
+            </div>
+          </td>
+          <td>
+            <button class="btn btn-warning btn-sm"
+                    onclick="UI.refreshOnePrice('${pos.symbol}','${pos.market || 'TW'}')"
+                    title="抓即時報價">🔄</button>
+            <button class="btn btn-danger btn-sm"
+                    onclick="UI.openMarginSellModal('${pos.id}')"
+                    title="平倉/回補">💰</button>
+          </td>
+        </tr>`;
+    });
+
+    wrap.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>股票</th><th>類型</th><th>股數</th><th>均價</th><th>現價</th>
+              <th>市值</th><th>自備款/保證金</th><th>維持率</th><th>損益</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  },
+
+  _calcMarginStats(list) {
+    let longValue = 0, shortValue = 0, totalLoan = 0, totalDeposit = 0;
+    let unrealizedPL = 0, totalCost = 0, realizedPL = 0;
+
+    list.forEach(pos => {
+      let shares = 0, cost = 0;
+      (pos.lots || []).forEach(l => {
+        const sh = l.remaining ?? l.shares ?? 0;
+        const ec = l.effectiveCost ?? l.price ?? 0;
+        shares += sh;
+        cost += sh * ec;
+      });
+      const value = shares * (pos.currentPrice || 0);
+      totalCost += cost;
+      realizedPL += pos.realizedPnl || 0;
+
+      if (pos.type === 'long') {
+        longValue += value;
+        totalLoan += pos.loanAmount || 0;
+        unrealizedPL += (value - cost);
+      } else {
+        shortValue += value;
+        totalDeposit += pos.depositAmount || 0;
+        unrealizedPL += (cost - value);
+      }
+    });
+
+    const unrealizedPLPct = totalCost > 0 ? (unrealizedPL / totalCost) * 100 : 0;
+    return { longValue, shortValue, totalLoan, totalDeposit,
+             unrealizedPL, unrealizedPLPct, realizedPL };
+  },
+
+  // ============================================================
+  // 📈 期貨 Tab
+  // ============================================================
+  renderFutures() {
+    const list = Store.getFutures() || [];
+    const stats = this._calcFuturesStats(list);
+
+    // ----- 統計卡片 -----
+    const grid = document.getElementById('futuresStatGrid');
+    if (grid) {
+      grid.innerHTML = `
+        <div class="stat-card">
+          <div class="stat-label">總部位數</div>
+          <div class="stat-value">${list.length}</div>
+          <div class="stat-sub">總口數 ${stats.totalContracts}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">已用保證金</div>
+          <div class="stat-value">${this._fmt(stats.totalMargin)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">未實現損益</div>
+          <div class="stat-value ${stats.unrealizedPL >= 0 ? 'up' : 'down'}">
+            ${stats.unrealizedPL >= 0 ? '+' : ''}${this._fmt(stats.unrealizedPL)}
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">已實現損益</div>
+          <div class="stat-value ${stats.realizedPL >= 0 ? 'up' : 'down'}">
+            ${stats.realizedPL >= 0 ? '+' : ''}${this._fmt(stats.realizedPL)}
+          </div>
+        </div>
+      `;
+    }
+
+    // ----- 列表 -----
+    const wrap = document.getElementById('futuresList');
+    if (!wrap) return;
+
+    if (list.length === 0) {
+      wrap.innerHTML = `
+        <div class="empty">
+          <div class="empty-icon">📈</div>
+          <div class="empty-text">尚無期貨部位</div>
+          <div class="empty-hint">點擊「🛒 開倉」開始</div>
+        </div>`;
+      return;
+    }
+
+    let rows = '';
+    list.forEach(pos => {
+      const productCfg = (CONFIG.FUTURES?.PRODUCTS?.[pos.product])
+                      || (CONFIG.FUTURES?.STOCK_FUT_TEMPLATES?.[pos.product])
+                      || {};
+      const pointValue = productCfg.pointValue || productCfg.multiplier 
+                      || productCfg.contractSize || 200;
+
+      const totalCon = pos.totalContracts || 0;
+      if (totalCon <= 0) return;
+
+      const curPrice = pos.currentPrice || pos.avgPrice || 0;
+      const points = pos.direction === 'long'
+        ? (curPrice - pos.avgPrice)
+        : (pos.avgPrice - curPrice);
+      const unrealPL = points * pointValue * totalCon;
+
+      const pricePct = pos.avgPrice > 0
+        ? ((curPrice - pos.avgPrice) / pos.avgPrice) * 100 * (pos.direction === 'long' ? 1 : -1)
+        : 0;
+
+      const directionLabel = pos.direction === 'long'
+        ? '<span class="up">多單</span>'
+        : '<span class="down">空單</span>';
+
+      const priceTimeStr = pos.lastPriceUpdate
+        ? this._timeAgo(pos.lastPriceUpdate)
+        : '<span class="muted">未更新</span>';
+
+      // 未更新報價時，提示用戶
+      const curPriceCell = pos.currentPrice
+        ? `${curPrice.toFixed(2)}`
+        : `<span class="muted">${pos.avgPrice.toFixed(2)}</span>`;
+
+      rows += `
+        <tr>
+          <td class="ticker-cell">
+            <strong>${pos.product}</strong>
+            <span class="ticker-name">${pos.name || pos.contract}</span>
+          </td>
+          <td>${directionLabel}</td>
+          <td class="num">${totalCon}</td>
+          <td class="num">${pos.avgPrice.toFixed(2)}</td>
+          <td class="num">
+            ${curPriceCell}
+            <div class="muted small">${priceTimeStr}</div>
+          </td>
+          <td class="num">${this._fmt(pos.marginUsed || 0)}</td>
+          <td class="num ${unrealPL >= 0 ? 'up' : 'down'}">
+            ${unrealPL >= 0 ? '+' : ''}${this._fmt(unrealPL)}
+            <div class="small ${pricePct >= 0 ? 'up' : 'down'}">
+              ${pricePct >= 0 ? '+' : ''}${pricePct.toFixed(2)}%
+            </div>
+          </td>
+          <td class="num ${(pos.realizedPnl || 0) >= 0 ? 'up' : 'down'}">
+            ${(pos.realizedPnl || 0) >= 0 ? '+' : ''}${this._fmt(pos.realizedPnl || 0)}
+          </td>
+          <td>
+            <button class="btn btn-secondary btn-sm"
+                    onclick="UI.openManualFuturesPriceModal('${pos.id}')"
+                    title="手動輸入價格">✏️</button>
+            <button class="btn btn-danger btn-sm"
+                    onclick="UI.openFuturesCloseModal('${pos.id}')"
+                    title="平倉">💰</button>
+          </td>
+        </tr>`;
+    });
+
+    wrap.innerHTML = `
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>商品</th><th>方向</th><th>口數</th><th>均價</th><th>現價</th>
+              <th>保證金</th><th>未實現損益</th><th>已實現</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  },
+
+  _calcFuturesStats(list) {
+    let totalContracts = 0, totalMargin = 0, unrealizedPL = 0, realizedPL = 0;
+
+    list.forEach(pos => {
+      const productCfg = (CONFIG.FUTURES?.PRODUCTS?.[pos.product])
+                      || (CONFIG.FUTURES?.STOCK_FUT_TEMPLATES?.[pos.product])
+                      || {};
+      const pointValue = productCfg.pointValue || productCfg.multiplier 
+                      || productCfg.contractSize || 200;
+
+      const con = pos.totalContracts || 0;
+      totalContracts += con;
+      totalMargin += pos.marginUsed || 0;
+      realizedPL += pos.realizedPnl || 0;
+
+      if (pos.currentPrice && pos.avgPrice && con > 0) {
+        const points = pos.direction === 'long'
+          ? (pos.currentPrice - pos.avgPrice)
+          : (pos.avgPrice - pos.currentPrice);
+        unrealizedPL += points * pointValue * con;
+      }
+    });
+
+    return { totalContracts, totalMargin, unrealizedPL, realizedPL };
+  },
+
+  // ============================================================
+  // 💎📈 暫時的 Modal 占位（D3 才完整實作）
+  // ============================================================
+  openMarginBuyModal() {
+    this.toast('🚧 融資/融券下單 Modal 將在 Phase D3 實作', 'warning');
+    console.log('💡 目前可用 Console 測試：Store.dispatch({type:"MARGIN_BUY", payload:{...}})');
+  },
+  openMarginSellModal(id) {
+    this.toast('🚧 融資/融券平倉 Modal 將在 Phase D3 實作', 'warning');
+    if (id) console.log('要平倉的 id:', id);
+  },
+  openFuturesOpenModal() {
+    this.toast('🚧 期貨開倉 Modal 將在 Phase D3 實作', 'warning');
+    console.log('💡 目前可用 Console 測試：Store.dispatch({type:"FUTURES_OPEN", payload:{...}})');
+  },
+  openFuturesCloseModal(id) {
+    this.toast('🚧 期貨平倉 Modal 將在 Phase D3 實作', 'warning');
+    if (id) console.log('要平倉的 id:', id);
+  },
+  openManualFuturesPriceModal(posId) {
+    const pos = Store.getFutures().find(f => f.id === posId);
+    if (!pos) return;
+    const cur = pos.currentPrice || pos.avgPrice || 0;
+    const newPrice = prompt(`手動輸入 ${pos.name || pos.contract} 的價格：`, cur);
+    if (newPrice === null) return;
+    const price = parseFloat(newPrice);
+    if (isNaN(price) || price < 0) {
+      this.toast('❌ 價格無效', 'error');
+      return;
+    }
+    // 直接寫入（暫時，等 D3 加 reducer action）
+    pos.currentPrice = price;
+    pos.lastPriceUpdate = new Date().toISOString();
+    Storage.saveLocal(Store.getPortfolio());
+    Store._notify();
+    this.toast(`✅ ${pos.name || pos.product} → ${price}`, 'success');
   },
 
   // ============================================================

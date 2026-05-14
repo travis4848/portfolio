@@ -139,6 +139,43 @@ const DataStructure = {
     };
   },
 
+  // ========== 別名：createStockLot（相容 calculator）==========
+  // 用法：createStockLot(shares, price, date, fee, note)
+  // 內部轉呼叫 createLot(date, shares, price, { fee, note, effectiveCost })
+  createStockLot(shares, price, date, fee = 0, note = '') {
+    return this.createLot(
+      date || new Date().toISOString().slice(0, 10),
+      shares,
+      price,
+      {
+        fee: fee,
+        note: note,
+        effectiveCost: price  // calculator 傳進來的 price 已是 effectiveCost
+      }
+    );
+  },
+
+  // ========== 別名：createMarginLot ==========
+  createMarginLot(shares, price, date, fee = 0, note = '') {
+    const lot = this.createStockLot(shares, price, date, fee, note);
+    lot.marginType = 'long';
+    return lot;
+  },
+
+  // ========== 別名：createFutureLot ==========
+  createFutureLot(contracts, price, date, fee = 0, note = '') {
+    return {
+      id: this._uid('flot'),
+      date: date || new Date().toISOString().slice(0, 10),
+      contracts: Number(contracts),
+      remaining: Number(contracts),
+      price: Number(price),
+      fee: Number(fee || 0),
+      note: note || '',
+      createdAt: new Date().toISOString()
+    };
+  },
+
   // ========== 建立 transaction（歷史紀錄）==========
   createTransaction(action, market, symbol, name, shares, price, extra = {}) {
     return {

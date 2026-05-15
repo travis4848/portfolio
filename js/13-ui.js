@@ -686,8 +686,11 @@ const UI = {
   // 💎📈 暫時的 Modal 占位（D3 才完整實作）
   // ============================================================
   openMarginBuyModal() {
-    this.toast('🚧 融資/融券下單 Modal 將在 Phase D3 實作', 'warning');
-    console.log('💡 目前可用 Console 測試：Store.dispatch({type:"MARGIN_BUY", payload:{...}})');
+    if (typeof TradeModal === 'undefined') {
+      this.toast('❌ TradeModal 未載入', 'error');
+      return;
+    }
+    TradeModal.openMarginOpenModal({ defaultType: 'long' });
   },
   openMarginSellModal(id) {
     this.toast('🚧 融資/融券平倉 Modal 將在 Phase D3 實作', 'warning');

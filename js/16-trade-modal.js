@@ -31,65 +31,58 @@ const TradeModal = {
   // ============================================================
   // 🔍 智慧搜尋（從 StockDB 模糊比對代號或名稱）
   // ============================================================
-searchStocks(keyword, limit = 8) {
-  if (!keyword || typeof StockDB === 'undefined' || !StockDB.stocks) return [];
+  searchStocks(keyword, limit = 8) {
+    if (!keyword || typeof StockDB === 'undefined' || !StockDB.stocks) return [];
 
-  const kw = String(keyword).trim().toUpperCase();
-  if (!kw) return [];
+    const kw = String(keyword).trim().toUpperCase();
+    if (!kw) return [];
 
-  // 🔧 統一把 StockDB.stocks 轉成 [{symbol, name}, ...] 陣列
-  const allStocks = [];
-  const raw = StockDB.stocks;
+    const allStocks = [];
+    const raw = StockDB.stocks;
 
-  if (Array.isArray(raw)) {
-    // 結構 A: 陣列
-    for (const item of raw) {
-      if (!item) continue;
-      const symbol = String(item.symbol || item.code || item.id || '').trim();
-      const name = String(item.name || '').trim();
-      if (symbol) allStocks.push({ symbol, name });
-    }
-  } else if (typeof raw === 'object') {
-    // 結構 B/C: 物件
-    for (const key in raw) {
-      const item = raw[key];
-      if (!item) continue;
-      
-      // 優先用 item 內的 symbol/code 欄位，沒有才用 key
-      let symbol = String(item.symbol || item.code || item.id || '').trim();
-      if (!symbol) symbol = String(key).trim();
-      
-      const name = String(item.name || '').trim();
-      if (symbol) allStocks.push({ symbol, name });
-    }
-  }
-
-  // 🔍 模糊比對
-  const exact = [];
-  const startsCode = [];
-  const startsName = [];
-  const includes = [];
-
-  for (const item of allStocks) {
-    const symbolUpper = item.symbol.toUpperCase();
-    const name = item.name;
-    const nameUpper = name.toUpperCase();
-
-    if (symbolUpper === kw) {
-      exact.push(item);
-    } else if (symbolUpper.startsWith(kw)) {
-      startsCode.push(item);
-    } else if (nameUpper.startsWith(kw) || name.startsWith(kw)) {
-      startsName.push(item);
-    } else if (symbolUpper.includes(kw) || nameUpper.includes(kw) || name.includes(kw)) {
-      includes.push(item);
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        if (!item) continue;
+        const symbol = String(item.symbol || item.code || item.id || '').trim();
+        const name = String(item.name || '').trim();
+        if (symbol) allStocks.push({ symbol, name });
+      }
+    } else if (typeof raw === 'object') {
+      for (const key in raw) {
+        const item = raw[key];
+        if (!item) continue;
+        let symbol = String(item.symbol || item.code || item.id || '').trim();
+        if (!symbol) symbol = String(key).trim();
+        const name = String(item.name || '').trim();
+        if (symbol) allStocks.push({ symbol, name });
+      }
     }
 
-    if (exact.length + startsCode.length + startsName.length + includes.length >= limit * 3) break;
-  }
+    const exact = [];
+    const startsCode = [];
+    const startsName = [];
+    const includes = [];
 
-  return [...exact, ...startsCode, ...startsName, ...includes].slice(0, limit);
-},
+    for (const item of allStocks) {
+      const symbolUpper = item.symbol.toUpperCase();
+      const name = item.name;
+      const nameUpper = name.toUpperCase();
+
+      if (symbolUpper === kw) {
+        exact.push(item);
+      } else if (symbolUpper.startsWith(kw)) {
+        startsCode.push(item);
+      } else if (nameUpper.startsWith(kw) || name.startsWith(kw)) {
+        startsName.push(item);
+      } else if (symbolUpper.includes(kw) || nameUpper.includes(kw) || name.includes(kw)) {
+        includes.push(item);
+      }
+
+      if (exact.length + startsCode.length + startsName.length + includes.length >= limit * 3) break;
+    }
+
+    return [...exact, ...startsCode, ...startsName, ...includes].slice(0, limit);
+  },
 
   // ============================================================
   // ⚡ 抓即時報價（用 PriceFetcher）
@@ -114,7 +107,6 @@ searchStocks(keyword, limit = 8) {
   // 🎯 自動完成下拉選單（綁定到輸入框）
   // ============================================================
   _attachAutocomplete($input, onSelect) {
-    // 建立 dropdown 容器
     const dropdown = document.createElement('div');
     dropdown.className = 'tm-autocomplete-dropdown';
     dropdown.style.cssText = `
@@ -158,11 +150,9 @@ searchStocks(keyword, limit = 8) {
       positionDropdown();
       dropdown.style.display = 'block';
 
-      // 綁定點擊
       dropdown.querySelectorAll('.tm-ac-item').forEach(el => {
         el.addEventListener('mouseenter', () => setActive(Number(el.dataset.idx)));
         el.addEventListener('mousedown', (e) => {
-          // 用 mousedown 而不是 click，避免 input blur 先觸發
           e.preventDefault();
           select(Number(el.dataset.idx));
         });
@@ -183,7 +173,6 @@ searchStocks(keyword, limit = 8) {
       onSelect(item);
     };
 
-    // input 事件
     let timer = null;
     $input.addEventListener('input', () => {
       clearTimeout(timer);
@@ -198,7 +187,6 @@ searchStocks(keyword, limit = 8) {
       }, 100);
     });
 
-    // 鍵盤操作
     $input.addEventListener('keydown', (e) => {
       if (dropdown.style.display === 'none') return;
       if (e.key === 'ArrowDown') {
@@ -217,16 +205,13 @@ searchStocks(keyword, limit = 8) {
       }
     });
 
-    // blur 隱藏
     $input.addEventListener('blur', () => {
       setTimeout(() => { dropdown.style.display = 'none'; }, 150);
     });
 
-    // 視窗滾動/resize 重新定位
     window.addEventListener('scroll', positionDropdown, true);
     window.addEventListener('resize', positionDropdown);
 
-    // 回傳銷毀函式
     return () => {
       dropdown.remove();
       window.removeEventListener('scroll', positionDropdown, true);
@@ -447,12 +432,10 @@ searchStocks(keyword, limit = 8) {
       $symbol.value = item.symbol;
       $name.value = item.name;
       $search.value = `${item.symbol}  ${item.name}`;
-      // 自動 focus 到股數
       setTimeout(() => $shares.focus(), 50);
     });
     modal._addCleanup(cleanupAC);
 
-    // 如果有 defaultSymbol，嘗試自動帶名稱
     if (defaultSymbol && typeof StockDB !== 'undefined' && StockDB.getStock) {
       const found = StockDB.getStock(defaultSymbol);
       if (found && found.name) {
@@ -475,7 +458,6 @@ searchStocks(keyword, limit = 8) {
       else $fee.focus();
     });
 
-    // ⚡ 抓即時報價
     $fetchPrice.addEventListener('click', async () => {
       const sym = ($symbol.value || '').trim().toUpperCase();
       if (!sym) {
@@ -548,7 +530,8 @@ searchStocks(keyword, limit = 8) {
     updatePreview();
     setTimeout(() => $search.focus(), 100);
   },
-    // ============================================================
+
+  // ============================================================
   // 💰 開啟「融資 / 融券 平倉」Modal
   // ============================================================
   openMarginCloseModal(positionId) {
@@ -580,14 +563,12 @@ searchStocks(keyword, limit = 8) {
     const isLong = pos.type === 'long';
     const today = new Date().toISOString().slice(0, 10);
 
-    // 部位整體未實現損益
     const positionValue = totalShares * curPrice;
     const positionPL = isLong
       ? (positionValue - totalCost)
       : (totalCost - positionValue);
     const positionPLPct = totalCost > 0 ? (positionPL / totalCost) * 100 : 0;
 
-    // 部位資訊區的標籤
     const typeLabel = isLong
       ? '<span class="up" style="font-weight:600;">💎 融資</span>'
       : '<span class="down" style="font-weight:600;">🩳 融券</span>';
@@ -723,7 +704,6 @@ searchStocks(keyword, limit = 8) {
 
       const subtotal = closeShares * closePrice;
 
-      // 手續費（自動 = 成交金額 × 0.1425% × 折扣，最低 20）
       const settings = (Store.getSettings && Store.getSettings()) || {};
       const discount = settings.brokerFeeDiscount ?? CONFIG?.BROKER_FEE_DISCOUNT ?? 0.28;
       const feeRate = CONFIG?.BROKER_FEE_RATE ?? 0.001425;
@@ -732,7 +712,6 @@ searchStocks(keyword, limit = 8) {
       const fee = $feeManual.checked ? (Number($fee.value) || 0) : autoFee;
       if (!$feeManual.checked) $fee.value = autoFee;
 
-      // 交易稅（融資賣出 0.3%；融券回補不收交易稅）
       let autoTax = 0;
       if (isLong) {
         autoTax = Math.round(subtotal * (CONFIG?.TAX_RATE ?? 0.003));
@@ -740,12 +719,12 @@ searchStocks(keyword, limit = 8) {
       const tax = $taxManual.checked ? (Number($tax.value) || 0) : autoTax;
       if (!$taxManual.checked) $tax.value = autoTax;
 
-      // 🔄 FIFO 模擬：依 lot 順序逐張結清
+      // 🔄 FIFO 模擬
       let remainingToClose = closeShares;
       const closedLots = [];
-      let totalLotCost = 0;       // 結清部分的總成本（含當初手續費攤平）
-      let releasedLoan = 0;       // 釋放的融資金
-      let releasedDeposit = 0;    // 釋放的保證金
+      let totalLotCost = 0;
+      let releasedLoan = 0;
+      let releasedDeposit = 0;
 
       for (const lot of lots) {
         if (remainingToClose <= 0) break;
@@ -757,7 +736,6 @@ searchStocks(keyword, limit = 8) {
         const lotCostPart = closeFromThis * lotEC;
         totalLotCost += lotCostPart;
 
-        // 比例釋放融資金 / 保證金
         if (isLong && lot.loanAmount) {
           releasedLoan += (lot.loanAmount * closeFromThis / lotRemain);
         }
@@ -775,9 +753,6 @@ searchStocks(keyword, limit = 8) {
         remainingToClose -= closeFromThis;
       }
 
-      // 已實現損益計算
-      // 融資（多單）：賣出收入 - 成本 - 手續費 - 交易稅
-      // 融券（空單）：成本 - 回補成本 - 手續費（賣出收入 - 回補成本扣手續費）
       let realizedPL;
       if (isLong) {
         realizedPL = subtotal - totalLotCost - fee - tax;
@@ -786,20 +761,13 @@ searchStocks(keyword, limit = 8) {
       }
       const realizedPLPct = totalLotCost > 0 ? (realizedPL / totalLotCost) * 100 : 0;
 
-      // 退回自備款（融資）= 釋放的融資金 + 平倉淨收入 - 原本成本 + 損益
-      // 簡化呈現：直接顯示「實際進帳金額」
       let netCashIn = 0;
       if (isLong) {
-        // 融資賣出：拿到 (賣出 - 手續費 - 交易稅 - 釋放融資金)
         netCashIn = subtotal - fee - tax - releasedLoan;
       } else {
-        // 融券回補：拿回保證金 + 損益（保證金原本就在我們這）
-        // 進帳 = 釋放保證金 + (賣出收入 - 回補成本 - 手續費)
-        // = 釋放保證金 + realizedPL（含當初借券費已扣）
         netCashIn = releasedDeposit + (totalLotCost - subtotal - fee - tax);
       }
 
-      // ---- 渲染 ----
       let lotsHtml = closedLots.map(l => `
         <div style="margin-left:8px;">
           • ${l.date || '?'} 
@@ -861,7 +829,6 @@ searchStocks(keyword, limit = 8) {
       else $tax.focus();
     });
 
-    // ⚡ 抓即時報價
     $fetchPrice.addEventListener('click', async () => {
       $fetchPrice.disabled = true;
       $fetchPrice.textContent = '⏳';
@@ -882,7 +849,7 @@ searchStocks(keyword, limit = 8) {
       }
     });
 
-    // ---------- 提交 ----------
+    // ---------- 提交（🔑 關鍵修正） ----------
     $submit.addEventListener('click', () => {
       const closeShares = Number($shares.value) || 0;
       const closePrice = Number($price.value) || 0;
@@ -900,20 +867,24 @@ searchStocks(keyword, limit = 8) {
       $submit.textContent = '處理中...';
 
       try {
+        const payload = {
+          id: pos.id,                       // ✅ reducer 用的就是這個
+          symbol: pos.symbol,
+          name: pos.name || pos.symbol,
+          type: (pos.type || 'long').toLowerCase(),
+          shares: closeShares,
+          price: closePrice,
+          fee: fee || 0,
+          tax: tax || 0,
+          date: date,
+          note: note || ''
+        };
+
+        console.log('[TradeModal] MARGIN_SELL payload:', payload);
+
         Store.dispatch({
           type: 'MARGIN_SELL',
-          payload: {
-            positionId: pos.id,
-            symbol: pos.symbol,
-            name: pos.name,
-            type: pos.type,
-            shares: closeShares,
-            price: closePrice,
-            fee,
-            tax,
-            date,
-            note
-          }
+          payload: payload
         });
 
         this._toast(`✅ ${closeAction} ${pos.symbol} ${this._fmt(closeShares)} 股 @ ${closePrice}`, 'success');
@@ -930,7 +901,6 @@ searchStocks(keyword, limit = 8) {
       }
     });
 
-    // 初始
     updatePreview();
     setTimeout(() => $shares.focus(), 100);
   }

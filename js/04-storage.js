@@ -184,7 +184,7 @@ const Storage = {
     this.setLastSync(new Date().toISOString());
     console.log('[Storage] ☁️ 已推送到 Gist');
     return gist;
-  }
+  },
   // ============================================================
   // 期貨權益數（單一帳戶）
   // ============================================================
@@ -197,7 +197,7 @@ const Storage = {
 
   setFuturesEquity(amount) {
     localStorage.setItem(this.KEY_FUTURES_EQUITY, String(amount || 0));
-  },
+  }
 
 
 };

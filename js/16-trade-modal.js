@@ -903,38 +903,25 @@ const TradeModal = {
 
     updatePreview();
     setTimeout(() => $shares.focus(), 100);
-  },
+  }  ,
 
   // ============================================================
-  // 🎯 開啟「期貨開倉」Modal
+  // 🎯 開啟「期貨開倉」Modal（含智慧搜尋）
   // ============================================================
-  openFuturesOpenModal({ defaultSymbol = 'TXF', defaultDirection = 'long' } = {}) {
+  openFuturesOpenModal({ defaultSymbol = '', defaultDirection = 'long' } = {}) {
     if (typeof FuturesHelper === 'undefined') {
       this._toast('❌ 期貨合約資料未載入', 'error');
       return;
     }
 
     const today = new Date().toISOString().slice(0, 10);
-    const groups = FuturesHelper.getContractsByCategory();
 
-    // 建立合約下拉選單 HTML
-    let contractOptionsHtml = '';
-    Object.keys(groups).forEach(catKey => {
-      const label = FUTURES_CATEGORY_LABELS[catKey] || catKey;
-      contractOptionsHtml += `<optgroup label="${label}">`;
-      groups[catKey].forEach(c => {
-        const sel = c.symbol === defaultSymbol ? 'selected' : '';
-        contractOptionsHtml += `<option value="${c.symbol}" ${sel}>${c.symbol} - ${c.name}（${c.multiplier} 元/點）</option>`;
-      });
-      contractOptionsHtml += `</optgroup>`;
-    });
-
-    // 預設結算月份建議（當月、次月）
+    // 結算月份建議
     const now = new Date();
     const yyyy = now.getFullYear();
     const mm = now.getMonth() + 1;
     const monthOptions = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       const d = new Date(yyyy, mm - 1 + i, 1);
       const y = d.getFullYear();
       const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -942,15 +929,31 @@ const TradeModal = {
     }
 
     const bodyHtml = `
-      <!-- 商品選擇 -->
+      <!-- 商品搜尋 -->
       <div class="form-group">
-        <label class="form-label">期貨商品 <span style="color:#ef4444;">*</span></label>
-        <select class="form-input" id="fut-symbol" style="cursor:pointer;">
-          ${contractOptionsHtml}
-        </select>
+        <label class="form-label">期貨商品 <span style="color:#ef4444;">*</span>
+          <span class="muted" style="font-size:11px; font-weight:normal;">
+            （指數期：TXF、MXF；個股期：直接輸入股票代號 例 2330）
+          </span>
+        </label>
+        <input class="form-input" type="text" id="fut-search" 
+               placeholder="輸入代號或名稱（TXF、台積、2330...）" autocomplete="off">
       </div>
 
-      <!-- 多空 + 結算月 -->
+      <!-- 商品資訊（自動帶入） -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">代號</label>
+          <input class="form-input" type="text" id="fut-symbol" placeholder="自動" 
+                 style="text-transform:uppercase;" readonly>
+        </div>
+        <div class="form-group">
+          <label class="form-label">名稱</label>
+          <input class="form-input" type="text" id="fut-name" placeholder="自動" readonly>
+        </div>
+      </div>
+
+      <!-- 方向 + 結算月 -->
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">方向 <span style="color:#ef4444;">*</span></label>
@@ -980,10 +983,28 @@ const TradeModal = {
           <input class="form-input" type="number" id="fut-lots" placeholder="1" min="1" step="1" value="1">
         </div>
         <div class="form-group">
-          <label class="form-label">建倉價格（點數）<span style="color:#ef4444;">*</span></label>
-          <input class="form-input" type="number" id="fut-price" placeholder="0.00" min="0" step="0.01">
+          <label class="form-label">建倉價格 <span style="color:#ef4444;">*</span></label>
+          <div style="display:flex; gap:4px;">
+            <input class="form-input" type="number" id="fut-price" placeholder="0.00" min="0" step="0.01" style="flex:1;">
+            <button type="button" id="fut-fetch-price" class="btn btn-warning" style="padding:0 10px;" title="抓取現貨報價（個股期）">⚡</button>
+          </div>
         </div>
       </div>
+
+      <!-- 進階：手動覆寫合約規格（個股期 / 自訂用） -->
+      <details id="fut-advanced" style="margin:8px 0; padding:8px; background:rgba(255,255,255,0.03); border-radius:6px;">
+        <summary style="cursor:pointer; color:#a5b4fc; font-size:12px;">⚙️ 進階：手動覆寫合約規格（個股期保證金）</summary>
+        <div class="form-row" style="margin-top:8px;">
+          <div class="form-group">
+            <label class="form-label" style="font-size:12px;">契約乘數</label>
+            <input class="form-input" type="number" id="fut-multi" placeholder="自動" min="0" step="1">
+          </div>
+          <div class="form-group">
+            <label class="form-label" style="font-size:12px;">原始保證金 (單口)</label>
+            <input class="form-input" type="number" id="fut-margin" placeholder="自動" min="0" step="100">
+          </div>
+        </div>
+      </details>
 
       <!-- 日期 + 手續費 -->
       <div class="form-row">
@@ -1002,29 +1023,28 @@ const TradeModal = {
         </div>
       </div>
 
-      <!-- 停損 / 停利（選填） -->
+      <!-- 停損 / 停利 -->
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">停損點 <span class="muted" style="font-size:11px;">（選填）</span></label>
+          <label class="form-label">停損 <span class="muted" style="font-size:11px;">（選填）</span></label>
           <input class="form-input" type="number" id="fut-sl" placeholder="例：17000" step="0.01">
         </div>
         <div class="form-group">
-          <label class="form-label">停利點 <span class="muted" style="font-size:11px;">（選填）</span></label>
+          <label class="form-label">停利 <span class="muted" style="font-size:11px;">（選填）</span></label>
           <input class="form-input" type="number" id="fut-tp" placeholder="例：18500" step="0.01">
         </div>
       </div>
 
-      <!-- 備註 -->
       <div class="form-group">
         <label class="form-label">備註</label>
         <input class="form-input" type="text" id="fut-note" placeholder="（選填）策略名稱、進場理由...">
       </div>
 
-      <!-- 試算區 -->
+      <!-- 試算 -->
       <div id="fut-preview" style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.3); border-radius:8px; padding:12px; margin-top:8px;">
         <div style="font-weight:600; color:#a5b4fc; margin-bottom:8px;">💡 試算 & 風險評估</div>
         <div id="fut-preview-content" style="font-size:13px; line-height:1.8;">
-          <span class="muted">請選擇商品並輸入價格...</span>
+          <span class="muted">請先選擇商品...</span>
         </div>
       </div>
     `;
@@ -1037,27 +1057,47 @@ const TradeModal = {
     const modal = this._buildModal('futures-open-modal', '🎯 期貨開倉', bodyHtml, footerHtml);
 
     const $ = sel => modal.querySelector(sel);
+    const $search = $('#fut-search');
     const $symbol = $('#fut-symbol');
+    const $name = $('#fut-name');
     const $expiry = $('#fut-expiry');
     const $lots = $('#fut-lots');
     const $price = $('#fut-price');
+    const $multi = $('#fut-multi');
+    const $marginInput = $('#fut-margin');
     const $date = $('#fut-date');
     const $feeManual = $('#fut-fee-manual');
     const $fee = $('#fut-fee');
     const $sl = $('#fut-sl');
     const $tp = $('#fut-tp');
     const $note = $('#fut-note');
+    const $fetchPrice = $('#fut-fetch-price');
     const $preview = $('#fut-preview-content');
     const $submit = $('#fut-submit');
 
+    let currentContract = null;
+
     const getDir = () => modal.querySelector('input[name="fdir"]:checked').value;
+
+    // ---------- 取得有效合約規格（含手動覆寫） ----------
+    const getEffectiveContract = () => {
+      if (!currentContract) return null;
+      const c = { ...currentContract };
+      const overrideMulti = Number($multi.value);
+      const overrideMargin = Number($marginInput.value);
+      if (overrideMulti > 0) c.multiplier = overrideMulti;
+      if (overrideMargin > 0) {
+        c.initialMargin = overrideMargin;
+        c.maintenanceMargin = Math.ceil(overrideMargin * 0.77);
+      }
+      return c;
+    };
 
     // ---------- 試算 ----------
     const updatePreview = () => {
-      const sym = $symbol.value;
-      const c = FuturesHelper.getContract(sym);
+      const c = getEffectiveContract();
       if (!c) {
-        $preview.innerHTML = '<span class="down">❌ 找不到合約規格</span>';
+        $preview.innerHTML = '<span class="muted">請先選擇商品...</span>';
         return;
       }
 
@@ -1070,37 +1110,44 @@ const TradeModal = {
         return;
       }
 
-      const contractValue = FuturesHelper.calcContractValue(sym, price, lots);
-      const requiredMargin = FuturesHelper.calcRequiredMargin(sym, lots, 'initial');
-      const maintMargin = FuturesHelper.calcRequiredMargin(sym, lots, 'maintenance');
+      const contractValue = price * c.multiplier * lots;
+
+      // 個股期：用建倉價算保證金
+      let requiredMargin, maintMargin;
+      if (c.isStockFutures || c._isDynamic) {
+        const tier = STOCK_FUTURES_MARGIN_TIERS.A;
+        requiredMargin = Math.ceil(contractValue * tier.initial);
+        maintMargin = Math.ceil(contractValue * tier.maintenance);
+      } else {
+        requiredMargin = c.initialMargin * lots;
+        maintMargin = c.maintenanceMargin * lots;
+      }
+
       const autoFee = c.feePerLot * lots * 2;
       const fee = $feeManual.checked ? (Number($fee.value) || 0) : autoFee;
       if (!$feeManual.checked) $fee.value = autoFee;
       const tax = Math.round(contractValue * c.taxRate * 2);
       const totalCost = fee + tax;
 
-      const pnlPerPoint = FuturesHelper.calcPnLPerPoint(sym, lots);
-      const liquidPts = FuturesHelper.calcLiquidationPoints(sym, lots);
+      const pnlPerPoint = c.multiplier * lots;
+      const buffer = requiredMargin - maintMargin;
+      const liquidPts = c.multiplier > 0 ? (buffer / c.multiplier) : 0;
       const liquidPrice = dir === 'long'
         ? (price - liquidPts).toFixed(2)
         : (price + liquidPts).toFixed(2);
 
-      // 停損 / 停利損益
       let slPnL = null, tpPnL = null;
       const slVal = Number($sl.value);
       const tpVal = Number($tp.value);
       if (slVal > 0) {
-        slPnL = dir === 'long'
-          ? (slVal - price) * pnlPerPoint - totalCost
-          : (price - slVal) * pnlPerPoint - totalCost;
+        slPnL = dir === 'long' ? (slVal - price) * pnlPerPoint - totalCost
+                                : (price - slVal) * pnlPerPoint - totalCost;
       }
       if (tpVal > 0) {
-        tpPnL = dir === 'long'
-          ? (tpVal - price) * pnlPerPoint - totalCost
-          : (price - tpVal) * pnlPerPoint - totalCost;
+        tpPnL = dir === 'long' ? (tpVal - price) * pnlPerPoint - totalCost
+                                : (price - tpVal) * pnlPerPoint - totalCost;
       }
 
-      // 風險警告：檢查資金是否充足（這裡先用簡化邏輯）
       const settings = (Store.getSettings && Store.getSettings()) || {};
       const availCapital = settings.availableCapital || 0;
       let warningHtml = '';
@@ -1112,33 +1159,73 @@ const TradeModal = {
         `;
       }
 
+      const tag = c.isStockFutures
+        ? '<span style="background:rgba(34,197,94,0.2); color:#86efac; padding:2px 6px; border-radius:4px; font-size:11px;">個股期</span>'
+        : (c.isCustom ? '<span style="background:rgba(168,85,247,0.2); color:#d8b4fe; padding:2px 6px; border-radius:4px; font-size:11px;">自訂</span>' : '');
+
       $preview.innerHTML = `
+        <div style="margin-bottom:6px;">
+          <strong>${c.symbol}</strong> ${c.name} ${tag}
+        </div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px 16px;">
-          <div>📦 契約乘數：<strong>${c.multiplier} 元/點</strong></div>
-          <div>💎 1 點價值：<strong>${this._fmt(pnlPerPoint)}</strong></div>
+          <div>📦 契約乘數：<strong>${this._fmt(c.multiplier)} ${c.isStockFutures ? '股' : '元/點'}</strong></div>
+          <div>💎 1 點/元價值：<strong>${this._fmt(pnlPerPoint)}</strong></div>
           <div>📊 契約總值：<strong>${this._fmt(contractValue)}</strong></div>
           <div>🔒 原始保證金：<strong style="color:#fbbf24;">${this._fmt(requiredMargin)}</strong></div>
           <div>🚨 維持保證金：<strong>${this._fmt(maintMargin)}</strong></div>
-          <div>💥 預估強平價：<strong class="down">${liquidPrice}</strong> <span class="muted">(${liquidPts}點)</span></div>
+          <div>💥 預估強平價：<strong class="down">${liquidPrice}</strong> <span class="muted">(${liquidPts.toFixed(2)})</span></div>
           <div>🧾 手續費（雙邊）：<strong>${this._fmt(fee)}</strong></div>
           <div>💰 期交稅（雙邊）：<strong>${this._fmt(tax)}</strong></div>
         </div>
         ${(slVal > 0 || tpVal > 0) ? '<hr style="border-color:rgba(255,255,255,0.1); margin:8px 0;">' : ''}
         ${slVal > 0 ? `<div>🛑 停損 @ <strong>${slVal}</strong> → <strong class="${slPnL >= 0 ? 'up' : 'down'}">${slPnL >= 0 ? '+' : ''}${this._fmt(slPnL)}</strong></div>` : ''}
         ${tpVal > 0 ? `<div>🎯 停利 @ <strong>${tpVal}</strong> → <strong class="${tpPnL >= 0 ? 'up' : 'down'}">${tpPnL >= 0 ? '+' : ''}${this._fmt(tpPnL)}</strong></div>` : ''}
-        ${(slVal > 0 && tpVal > 0) ? `
+        ${(slVal > 0 && tpVal > 0 && slPnL && tpPnL) ? `
           <div style="margin-top:6px; padding-top:6px; border-top:1px dashed rgba(255,255,255,0.1);">
-            ⚖️ 風險報酬比：<strong>${slPnL && tpPnL ? Math.abs(tpPnL / slPnL).toFixed(2) : '—'}</strong>
+            ⚖️ 風險報酬比：<strong>${Math.abs(tpPnL / slPnL).toFixed(2)}</strong>
           </div>
         ` : ''}
         ${warningHtml}
       `;
     };
 
+    // ---------- 選定合約 ----------
+    const selectContract = (contract) => {
+      currentContract = contract;
+      $symbol.value = contract.symbol;
+      $name.value = contract.name;
+      $search.value = `${contract.symbol}  ${contract.name}`;
+      // 預填預設手續費
+      $fee.value = contract.feePerLot * (Number($lots.value) || 1) * 2;
+      // 重置進階覆寫
+      $multi.value = '';
+      $marginInput.value = '';
+      $multi.placeholder = `自動 (${contract.multiplier})`;
+      $marginInput.placeholder = `自動 (${this._fmt(contract.initialMargin)})`;
+      // 個股期自動嘗試抓現價
+      if (contract.isStockFutures) {
+        setTimeout(() => $fetchPrice.click(), 100);
+      } else {
+        setTimeout(() => $price.focus(), 50);
+      }
+      updatePreview();
+    };
+
+    // ---------- 智慧搜尋 dropdown ----------
+    const cleanupAC = this._attachFuturesAutocomplete($search, (item) => {
+      selectContract(item);
+    });
+    modal._addCleanup(cleanupAC);
+
+    // 預設帶入
+    if (defaultSymbol) {
+      const c = FuturesHelper.getContract(defaultSymbol);
+      if (c) selectContract(c);
+    }
+
     // ---------- 事件 ----------
-    [$symbol, $lots, $price, $fee, $sl, $tp].forEach(el => {
+    [$lots, $price, $fee, $sl, $tp, $multi, $marginInput].forEach(el => {
       el.addEventListener('input', updatePreview);
-      el.addEventListener('change', updatePreview);
     });
     modal.querySelectorAll('input[name="fdir"]').forEach(r => {
       r.addEventListener('change', updatePreview);
@@ -1149,11 +1236,36 @@ const TradeModal = {
       else $fee.focus();
     });
 
+    // ⚡ 抓現貨價（個股期用）
+    $fetchPrice.addEventListener('click', async () => {
+      if (!currentContract) {
+        this._toast('請先選擇商品', 'warning');
+        return;
+      }
+      const querySym = currentContract.underlyingSymbol || currentContract.symbol;
+      $fetchPrice.disabled = true;
+      $fetchPrice.textContent = '⏳';
+      try {
+        const p = await this.fetchStockPrice(querySym);
+        if (p != null) {
+          $price.value = p;
+          updatePreview();
+          this._toast(`✅ 已帶入 ${querySym} 現價：${p}`, 'success');
+        } else {
+          this._toast('抓取報價失敗', 'warning');
+        }
+      } catch (err) {
+        this._toast('查詢失敗：' + err.message, 'error');
+      } finally {
+        $fetchPrice.disabled = false;
+        $fetchPrice.textContent = '⚡';
+      }
+    });
+
     // ---------- 提交 ----------
     $submit.addEventListener('click', () => {
-      const sym = $symbol.value;
-      const c = FuturesHelper.getContract(sym);
-      if (!c) { this._toast('找不到合約', 'error'); return; }
+      const c = getEffectiveContract();
+      if (!c) { this._toast('請選擇商品', 'error'); $search.focus(); return; }
 
       const dir = getDir();
       const expiry = $expiry.value;
@@ -1168,20 +1280,34 @@ const TradeModal = {
       if (lots <= 0) { this._toast('口數必須大於 0', 'error'); $lots.focus(); return; }
       if (price <= 0) { this._toast('價格必須大於 0', 'error'); $price.focus(); return; }
 
+      // 動態算保證金（個股期）
+      const contractValue = price * c.multiplier * lots;
+      let initialMargin, maintMargin;
+      if (c.isStockFutures || c._isDynamic) {
+        const tier = STOCK_FUTURES_MARGIN_TIERS.A;
+        initialMargin = Math.ceil(contractValue * tier.initial);
+        maintMargin = Math.ceil(contractValue * tier.maintenance);
+      } else {
+        initialMargin = c.initialMargin * lots;
+        maintMargin = c.maintenanceMargin * lots;
+      }
+
       $submit.disabled = true;
       $submit.textContent = '處理中...';
 
       try {
         const payload = {
-          symbol: sym,
+          symbol: c.symbol,
           name: c.name,
           contractMonth: expiry,
-          type: dir,                  // 'long' | 'short'
+          type: dir,
           lots: lots,
           price: price,
           multiplier: c.multiplier,
-          initialMargin: c.initialMargin * lots,
-          maintenanceMargin: c.maintenanceMargin * lots,
+          initialMargin: initialMargin,
+          maintenanceMargin: maintMargin,
+          isStockFutures: !!c.isStockFutures,
+          underlyingSymbol: c.underlyingSymbol || null,
           fee: fee,
           stopLoss: sl || null,
           takeProfit: tp || null,
@@ -1212,10 +1338,131 @@ const TradeModal = {
       }
     });
 
-    updatePreview();
-    setTimeout(() => $price.focus(), 100);
-  }
+    setTimeout(() => $search.focus(), 100);
+  },
 
+  // ============================================================
+  // 🔍 期貨商品自動完成（指數期 + 個股期）
+  // ============================================================
+  _attachFuturesAutocomplete($input, onSelect) {
+    const dropdown = document.createElement('div');
+    dropdown.className = 'tm-autocomplete-dropdown';
+    dropdown.style.cssText = `
+      position: absolute; background: #1e293b; border: 1px solid #475569;
+      border-radius: 6px; max-height: 300px; overflow-y: auto;
+      z-index: 10000; display: none; min-width: 280px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    `;
+    document.body.appendChild(dropdown);
+
+    let activeIndex = -1;
+    let currentItems = [];
+
+    const positionDropdown = () => {
+      const rect = $input.getBoundingClientRect();
+      dropdown.style.left = `${rect.left + window.scrollX}px`;
+      dropdown.style.top = `${rect.bottom + window.scrollY + 2}px`;
+      dropdown.style.width = `${rect.width}px`;
+    };
+
+    const renderItems = (items) => {
+      currentItems = items;
+      activeIndex = -1;
+      if (items.length === 0) {
+        dropdown.innerHTML = `<div style="padding:12px; color:#94a3b8; font-size:13px;">無結果</div>`;
+        positionDropdown();
+        dropdown.style.display = 'block';
+        return;
+      }
+      dropdown.innerHTML = items.map((it, i) => {
+        const tag = it.isStockFutures
+          ? '<span style="background:rgba(34,197,94,0.2); color:#86efac; padding:1px 5px; border-radius:3px; font-size:10px;">個股</span>'
+          : it.isCustom
+            ? '<span style="background:rgba(168,85,247,0.2); color:#d8b4fe; padding:1px 5px; border-radius:3px; font-size:10px;">自訂</span>'
+            : `<span style="background:rgba(99,102,241,0.2); color:#a5b4fc; padding:1px 5px; border-radius:3px; font-size:10px;">${(FUTURES_CATEGORY_LABELS[it.category] || '').slice(0, 4)}</span>`;
+        return `
+          <div class="tm-ac-item" data-idx="${i}" 
+               style="padding:8px 12px; cursor:pointer; display:flex; gap:10px; align-items:center; border-bottom:1px solid #334155;">
+            <strong style="color:#60a5fa; min-width:60px;">${it.symbol}</strong>
+            <span style="color:#e2e8f0; flex:1;">${it.name}</span>
+            ${tag}
+          </div>
+        `;
+      }).join('');
+      positionDropdown();
+      dropdown.style.display = 'block';
+
+      dropdown.querySelectorAll('.tm-ac-item').forEach(el => {
+        el.addEventListener('mouseenter', () => setActive(Number(el.dataset.idx)));
+        el.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          select(Number(el.dataset.idx));
+        });
+      });
+    };
+
+    const setActive = (idx) => {
+      activeIndex = idx;
+      dropdown.querySelectorAll('.tm-ac-item').forEach((el, i) => {
+        el.style.background = (i === idx) ? '#334155' : 'transparent';
+      });
+    };
+
+    const select = (idx) => {
+      if (idx < 0 || idx >= currentItems.length) return;
+      const item = currentItems[idx];
+      dropdown.style.display = 'none';
+      onSelect(item);
+    };
+
+    let timer = null;
+    $input.addEventListener('input', () => {
+      clearTimeout(timer);
+      const kw = $input.value.trim();
+      timer = setTimeout(() => {
+        const items = FuturesHelper.searchContracts(kw, 12);
+        renderItems(items);
+      }, 100);
+    });
+
+    // focus 也顯示
+    $input.addEventListener('focus', () => {
+      const kw = $input.value.trim();
+      const items = FuturesHelper.searchContracts(kw, 12);
+      renderItems(items);
+    });
+
+    $input.addEventListener('keydown', (e) => {
+      if (dropdown.style.display === 'none') return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActive(Math.min(activeIndex + 1, currentItems.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActive(Math.max(activeIndex - 1, 0));
+      } else if (e.key === 'Enter') {
+        if (activeIndex >= 0) {
+          e.preventDefault();
+          select(activeIndex);
+        }
+      } else if (e.key === 'Escape') {
+        dropdown.style.display = 'none';
+      }
+    });
+
+    $input.addEventListener('blur', () => {
+      setTimeout(() => { dropdown.style.display = 'none'; }, 150);
+    });
+
+    window.addEventListener('scroll', positionDropdown, true);
+    window.addEventListener('resize', positionDropdown);
+
+    return () => {
+      dropdown.remove();
+      window.removeEventListener('scroll', positionDropdown, true);
+      window.removeEventListener('resize', positionDropdown);
+    };
+  }
 
 };
 

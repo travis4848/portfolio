@@ -470,7 +470,42 @@ const Store = {
           }
         );
         this.state.history.transactions.push(tx);
-
+        
+        // 用 FuturesHelper 補齊 isStockFutures / underlyingSymbol
+        let isStockFutures = false;
+        let underlyingSymbol = '';
+        if (typeof FuturesHelper !== 'undefined') {
+          const c = FuturesHelper.getContract(payload.symbol);
+          if (c) {
+            isStockFutures = !!c.isStockFutures;
+            underlyingSymbol = c.underlyingSymbol || '';
+          }
+        }
+        
+        const newPos = {
+          id: 'fut_' + Math.random().toString(36).slice(2, 12),
+          symbol: payload.symbol,
+          name: payload.name,
+          contractMonth: payload.contractMonth,
+          type: payload.type,
+          lots: payload.lots,
+          avgPrice: payload.price,
+          multiplier: payload.multiplier,
+          initialMargin: payload.initialMargin,
+          maintenanceMargin: payload.maintenanceMargin,
+          fee: payload.fee || 0,
+          
+          // 🆕 標的股相關
+          isStockFutures: isStockFutures,
+          underlyingSymbol: underlyingSymbol,
+          
+          currentPrice: payload.price,
+          realizedPnl: 0,
+          note: payload.note || '',
+          openDate: payload.date,
+          market: 'TW',
+          createdAt: Date.now()
+        };
         return { position: newPos, transaction: tx };
       }
 

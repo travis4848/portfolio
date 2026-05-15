@@ -1539,22 +1539,51 @@ const TradeModal = {
     });
 
     // ⚡ 抓現價
+        // ⚡ 抓現價（智慧判斷個股期 → 標的股）
     $fetchPrice.addEventListener('click', async () => {
-      const querySym = pos.isStockFutures && pos.underlyingSymbol
-        ? pos.underlyingSymbol
-        : pos.symbol;
+      // 1. 推導要查詢的代號
+      let querySym = pos.symbol;
+      let queryNote = '';
+      
+      // (a) 部位本身有存 underlyingSymbol → 直接用
+      if (pos.underlyingSymbol) {
+        querySym = pos.underlyingSymbol;
+        queryNote = `（個股期 → 查標的 ${querySym}）`;
+      }
+      // (b) 用 FuturesHelper 解析
+      else if (typeof FuturesHelper !== 'undefined') {
+        const c = FuturesHelper.getContract(pos.symbol);
+        if (c && c.isStockFutures && c.underlyingSymbol) {
+          querySym = c.underlyingSymbol;
+          queryNote = `（個股期 → 查標的 ${querySym}）`;
+        } else if (c && c.isStockFutures) {
+          // 是個股期但沒 underlyingSymbol → 提示手動
+          this._toast('⚠️ 個股期需手動輸入價格（無對應標的設定）', 'warning');
+          return;
+        }
+      }
+      
+      // (c) 指數期（TXF/MXF/TMF）→ Yahoo 不支援，直接提示
+      const indexFutures = ['TXF', 'MXF', 'TMF', 'EXF', 'FXF', 'GTF'];
+      if (indexFutures.includes(querySym)) {
+        this._toast('⚠️ 指數期無法自動抓價，請手動輸入', 'warning');
+        return;
+      }
+      
+      // 2. 執行查詢
       $fetchPrice.disabled = true;
       $fetchPrice.textContent = '⏳';
       try {
         const p = await this.fetchStockPrice(querySym);
-        if (p != null) {
+        if (p != null && p > 0) {
           $price.value = p;
           updatePreview();
-          this._toast(`✅ 已帶入 ${querySym} 現價：${p}`, 'success');
+          this._toast(`✅ 已帶入現價：${p} ${queryNote}`, 'success');
         } else {
-          this._toast('抓取報價失敗（指數期可能無法直接查詢，請手動輸入）', 'warning');
+          this._toast('❌ 抓取失敗，請手動輸入', 'warning');
         }
       } catch (err) {
+        console.error('[FuturesClose] 抓價失敗:', err);
         this._toast('查詢失敗：' + err.message, 'error');
       } finally {
         $fetchPrice.disabled = false;

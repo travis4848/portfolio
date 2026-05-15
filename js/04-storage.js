@@ -185,6 +185,21 @@ const Storage = {
     console.log('[Storage] ☁️ 已推送到 Gist');
     return gist;
   }
+  // ============================================================
+  // 期貨權益數（單一帳戶）
+  // ============================================================
+  KEY_FUTURES_EQUITY: 'futures_equity',
+
+  getFuturesEquity() {
+    const v = localStorage.getItem(this.KEY_FUTURES_EQUITY);
+    return v ? parseFloat(v) : 0;
+  },
+
+  setFuturesEquity(amount) {
+    localStorage.setItem(this.KEY_FUTURES_EQUITY, String(amount || 0));
+  },
+
+
 };
 
 window.Storage = Storage;

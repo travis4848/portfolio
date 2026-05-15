@@ -546,41 +546,50 @@ const UI = {
   renderFutures() {
     const list = Store.getFutures() || [];
     const stats = this._calcFuturesStats(list);
+    // ⭐ 取得期貨帳戶權益
+    const equity = Storage.getFuturesEquity() || 0;
+    
+    // ⭐ 真實槓桿（權益）
+    const equityLeverage = equity > 0 
+      ? (stats.totalContractValue / equity) 
+      : 0;
+    
+    // ⭐ 權益槓桿風險顏色
+    const eqLevClass = equityLeverage >= 5 ? 'down' 
+                     : equityLeverage >= 3 ? '' 
+                     : equityLeverage >= 1 ? 'up' 
+                     : 'muted';
 
-    const grid = document.getElementById('futuresStatGrid');
-    if (grid) {
-      grid.innerHTML = `
-        <div class="stat-card">
-          <div class="stat-label">總部位數</div>
-          <div class="stat-value">${list.length}</div>
-          <div class="stat-sub">總口數 ${stats.totalLots}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">已用保證金</div>
-          <div class="stat-value">${this._fmt(stats.totalMargin)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">未實現損益</div>
-          <div class="stat-value ${stats.unrealizedPL >= 0 ? 'up' : 'down'}">
-            ${stats.unrealizedPL >= 0 ? '+' : ''}${this._fmt(stats.unrealizedPL)}
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">已實現損益</div>
-          <div class="stat-value ${stats.realizedPL >= 0 ? 'up' : 'down'}">
-            ${stats.realizedPL >= 0 ? '+' : ''}${this._fmt(stats.realizedPL)}
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">⚖️ 平均槓桿</div>
-          <div class="stat-value ${stats.avgLeverage >= 15 ? 'down' : stats.avgLeverage >= 10 ? '' : 'up'}">
-            ${(stats.avgLeverage || 0).toFixed(1)} x
-          </div>
-          <div class="stat-sub muted">契約值/保證金</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">📊 契約總值</div>
-          <div class="stat-value">${this._fmt(stats.totalContractValue)}</div>
+   // ⭐ 渲染權益輸入區（放在統計卡上方）
+    const equityBar = document.getElementById('futuresEquityBar');
+    if (equityBar) {
+      const suggestedEquity = stats.totalMargin + stats.unrealizedPL;  // 估算建議值
+      equityBar.innerHTML = `
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; padding:10px 12px; background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.3); border-radius:8px; margin-bottom:12px;">
+          <span style="font-size:14px; font-weight:600;">💰 期貨帳戶權益：</span>
+          <input type="number" id="inpFuturesEquity" 
+                 class="form-input" 
+                 style="width:160px; padding:6px 10px; font-size:14px;"
+                 value="${equity}" 
+                 placeholder="輸入帳戶總權益">
+          <button class="btn btn-primary btn-sm" onclick="UI.saveFuturesEquity()">💾 儲存</button>
+          <button class="btn btn-secondary btn-sm" onclick="UI.estimateFuturesEquity(${suggestedEquity})" 
+                  title="以 (保證金+未實現損益) 估算">
+            📊 估算（${this._fmt(suggestedEquity)}）
+          </button>
+          ${equity > 0 ? `
+            <span style="margin-left:auto; font-size:13px;">
+              ⚖️ 權益槓桿：
+              <strong class="${eqLevClass}" style="font-size:18px;">
+                ${equityLeverage.toFixed(2)} x
+              </strong>
+              <span class="muted small">（契約值 ${this._fmt(stats.totalContractValue)} / 權益 ${this._fmt(equity)}）</span>
+            </span>
+          ` : `
+            <span style="margin-left:auto; color:#fbbf24; font-size:13px;">
+              ℹ️ 請輸入權益數以計算真實槓桿
+            </span>
+          `}
         </div>
       `;
     }
@@ -853,6 +862,28 @@ const UI = {
     Storage.saveLocal(Store.getPortfolio());
     Store._notify();
     this.toast(`✅ ${pos.name || pos.symbol} → ${price}`, 'success');
+  },
+
+  // ============================================================
+  // 💰 期貨帳戶權益管理
+  // ============================================================
+  saveFuturesEquity() {
+    const inp = document.getElementById('inpFuturesEquity');
+    if (!inp) return;
+    const val = parseFloat(inp.value);
+    if (isNaN(val) || val < 0) {
+      this.toast('❌ 權益數無效', 'error');
+      return;
+    }
+    Storage.setFuturesEquity(val);
+    this.toast(`✅ 權益已儲存：${this._fmt(val)}`, 'success');
+    this.renderFutures();
+  },
+
+  estimateFuturesEquity(amount) {
+    const inp = document.getElementById('inpFuturesEquity');
+    if (inp) inp.value = Math.round(amount);
+    this.toast('💡 已填入估算值，請確認後按「儲存」', 'success');
   },
 
   // ============================================================

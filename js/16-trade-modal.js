@@ -628,13 +628,7 @@ searchStocks(keyword, limit = 8) {
           <span class="muted" style="font-size:11px; font-weight:normal;">（最多 ${this._fmt(totalShares)} 股）</span>
         </label>
         <input class="form-input" type="number" id="mtc-shares" 
-               placeholder="輸入平倉股數" min="1" max="${totalShares}" step="1000">
-        <div style="display:flex; gap:6px; margin-top:6px;">
-          <button type="button" class="btn btn-secondary btn-sm" data-portion="0.25">1/4</button>
-          <button type="button" class="btn btn-secondary btn-sm" data-portion="0.5">1/2</button>
-          <button type="button" class="btn btn-secondary btn-sm" data-portion="0.75">3/4</button>
-          <button type="button" class="btn btn-warning btn-sm" data-portion="1">全部</button>
-        </div>
+            placeholder="輸入平倉股數" min="1" max="${totalShares}" step="1000">
       </div>
 
       <!-- 平倉價格 -->
@@ -849,19 +843,6 @@ searchStocks(keyword, limit = 8) {
         </div>
       `;
     };
-
-    // ---------- 快捷按鈕 ----------
-    modal.querySelectorAll('[data-portion]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const portion = Number(btn.dataset.portion);
-        // 取整到 1000（台股一張）
-        let targetShares = Math.floor(totalShares * portion);
-        if (portion === 1) targetShares = totalShares;
-        else targetShares = Math.max(1000, Math.floor(targetShares / 1000) * 1000);
-        $shares.value = Math.min(targetShares, totalShares);
-        updatePreview();
-      });
-    });
 
     // ---------- 事件 ----------
     [$shares, $price, $fee, $tax].forEach(el => {

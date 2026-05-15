@@ -426,78 +426,52 @@ const Store = {
       // 📈 期貨
       // ============================================================
       case 'FUTURES_OPEN': {
-        // payload: { product, contract, name, direction, contracts, price, fee, date, note, underlyingSymbol }
-        const list = this.state.portfolio.futures || (this.state.portfolio.futures = []);
-        let pos = list.find(f =>
-          f.product === payload.product &&
-          f.contract === payload.contract &&
-          f.direction === payload.direction
-        );
+        // payload: { symbol, name, contractMonth, type, lots, price, multiplier,
+        //           initialMargin, maintenanceMargin, fee, stopLoss, takeProfit, date, note }
+        if (!this.state.portfolio.futures) this.state.portfolio.futures = [];
 
-        // 取商品設定（沿用你 01-config.js 的 CONFIG.FUTURES.PRODUCTS）
-        const productCfg = CONFIG.FUTURES?.PRODUCTS?.[payload.product]
-                        || CONFIG.FUTURES?.STOCK_FUT_TEMPLATES?.[payload.product]
-                        || {};
-        const fee = payload.fee != null
-          ? Number(payload.fee)
-          : (productCfg.feePerLot || 30) * payload.contracts;
+        const newPos = {
+          id: 'fut_' + Math.random().toString(36).slice(2, 12),
+          symbol: payload.symbol,
+          name: payload.name,
+          contractMonth: payload.contractMonth,
+          type: payload.type,                    // 'long' | 'short'
+          lots: payload.lots,
+          avgPrice: payload.price,
+          currentPrice: payload.price,
+          multiplier: payload.multiplier,
+          initialMargin: payload.initialMargin,
+          maintenanceMargin: payload.maintenanceMargin,
+          fee: payload.fee || 0,
+          stopLoss: payload.stopLoss,
+          takeProfit: payload.takeProfit,
+          realizedPnl: 0,
+          note: payload.note || '',
+          openDate: payload.date,
+          market: payload.market || 'TW',
+          createdAt: Date.now()
+        };
 
-        // 計算保證金
-        let marginNeeded = 0;
-        if (productCfg.category === 'index') {
-          marginNeeded = (productCfg.margin || 0) * payload.contracts;
-        } else if (productCfg.category === 'stock') {
-          // 個股期：標的價 × 契約規模 × 保證金比率 × 口數
-          const notional = (payload.price || 0) * (productCfg.contractSize || 2000);
-          marginNeeded = notional * (productCfg.marginRate || 0.135) * payload.contracts;
-        } else {
-          // fallback：用舊的 multiplier
-          marginNeeded = (productCfg.margin || 0) * payload.contracts;
-        }
-
-        if (!pos) {
-          pos = DataStructure.createFutures(
-            payload.product,
-            payload.contract,
-            payload.name || payload.contract,
-            payload.direction,
-            payload.underlyingSymbol || ''
-          );
-          list.push(pos);
-        }
-
-        // 加 lot
-        pos.lots.push(DataStructure.createFuturesLot(
-          payload.date || new Date().toISOString().slice(0, 10),
-          payload.contracts,
-          payload.price,
-          { fee, margin: marginNeeded, note: payload.note || '' }
-        ));
-
-        // 重算加權平均進場價 + 總口數
-        let totalCon = 0, totalNotion = 0;
-        pos.lots.forEach(l => {
-          const c = Number(l.remaining ?? l.contracts) || 0;
-          totalCon += c;
-          totalNotion += c * (Number(l.price) || 0);
-        });
-        pos.totalContracts = totalCon;
-        pos.avgPrice = totalCon > 0 ? totalNotion / totalCon : 0;
-        pos.marginUsed = (pos.marginUsed || 0) + marginNeeded;
+        this.state.portfolio.futures.push(newPos);
 
         // 記錄交易
         const tx = DataStructure.createTransaction(
-          payload.direction === 'long' ? 'FUT_LONG_OPEN' : 'FUT_SHORT_OPEN',
+          'FUTURES_OPEN',
           'futures',
-          payload.contract,
-          payload.name || pos.name,
-          payload.contracts,
+          payload.symbol,
+          payload.name,
+          payload.lots,
           payload.price,
-          { fee, tax: 0, note: payload.note || '', product: payload.product }
+          {
+            fee: payload.fee || 0,
+            contractMonth: payload.contractMonth,
+            direction: payload.type,
+            note: payload.note || ''
+          }
         );
         this.state.history.transactions.push(tx);
 
-        return { position: pos, transaction: tx };
+        return { position: newPos, transaction: tx };
       }
 
       case 'FUTURES_CLOSE': {

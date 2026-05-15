@@ -903,7 +903,319 @@ const TradeModal = {
 
     updatePreview();
     setTimeout(() => $shares.focus(), 100);
+  },
+
+  // ============================================================
+  // 🎯 開啟「期貨開倉」Modal
+  // ============================================================
+  openFuturesOpenModal({ defaultSymbol = 'TXF', defaultDirection = 'long' } = {}) {
+    if (typeof FuturesHelper === 'undefined') {
+      this._toast('❌ 期貨合約資料未載入', 'error');
+      return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const groups = FuturesHelper.getContractsByCategory();
+
+    // 建立合約下拉選單 HTML
+    let contractOptionsHtml = '';
+    Object.keys(groups).forEach(catKey => {
+      const label = FUTURES_CATEGORY_LABELS[catKey] || catKey;
+      contractOptionsHtml += `<optgroup label="${label}">`;
+      groups[catKey].forEach(c => {
+        const sel = c.symbol === defaultSymbol ? 'selected' : '';
+        contractOptionsHtml += `<option value="${c.symbol}" ${sel}>${c.symbol} - ${c.name}（${c.multiplier} 元/點）</option>`;
+      });
+      contractOptionsHtml += `</optgroup>`;
+    });
+
+    // 預設結算月份建議（當月、次月）
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = now.getMonth() + 1;
+    const monthOptions = [];
+    for (let i = 0; i < 4; i++) {
+      const d = new Date(yyyy, mm - 1 + i, 1);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      monthOptions.push({ value: `${y}${m}`, label: `${y}/${m}` });
+    }
+
+    const bodyHtml = `
+      <!-- 商品選擇 -->
+      <div class="form-group">
+        <label class="form-label">期貨商品 <span style="color:#ef4444;">*</span></label>
+        <select class="form-input" id="fut-symbol" style="cursor:pointer;">
+          ${contractOptionsHtml}
+        </select>
+      </div>
+
+      <!-- 多空 + 結算月 -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">方向 <span style="color:#ef4444;">*</span></label>
+          <div style="display:flex; gap:16px; padding:6px 0;">
+            <label style="cursor:pointer; display:flex; align-items:center; gap:6px;">
+              <input type="radio" name="fdir" value="long" ${defaultDirection === 'long' ? 'checked' : ''}>
+              <span class="up" style="font-weight:600;">📈 做多</span>
+            </label>
+            <label style="cursor:pointer; display:flex; align-items:center; gap:6px;">
+              <input type="radio" name="fdir" value="short" ${defaultDirection === 'short' ? 'checked' : ''}>
+              <span class="down" style="font-weight:600;">📉 做空</span>
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">結算月份</label>
+          <select class="form-input" id="fut-expiry" style="cursor:pointer;">
+            ${monthOptions.map((o, i) => `<option value="${o.value}" ${i === 0 ? 'selected' : ''}>${o.label}${i === 0 ? '（近月）' : ''}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <!-- 口數 + 價格 -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">口數 <span style="color:#ef4444;">*</span></label>
+          <input class="form-input" type="number" id="fut-lots" placeholder="1" min="1" step="1" value="1">
+        </div>
+        <div class="form-group">
+          <label class="form-label">建倉價格（點數）<span style="color:#ef4444;">*</span></label>
+          <input class="form-input" type="number" id="fut-price" placeholder="0.00" min="0" step="0.01">
+        </div>
+      </div>
+
+      <!-- 日期 + 手續費 -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">日期</label>
+          <input class="form-input" type="date" id="fut-date" value="${today}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            手續費
+            <label style="font-weight:normal; font-size:12px; margin-left:8px; cursor:pointer;">
+              <input type="checkbox" id="fut-fee-manual" style="vertical-align:middle;"> 手動
+            </label>
+          </label>
+          <input class="form-input" type="number" id="fut-fee" placeholder="自動" min="0" step="1" disabled>
+        </div>
+      </div>
+
+      <!-- 停損 / 停利（選填） -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">停損點 <span class="muted" style="font-size:11px;">（選填）</span></label>
+          <input class="form-input" type="number" id="fut-sl" placeholder="例：17000" step="0.01">
+        </div>
+        <div class="form-group">
+          <label class="form-label">停利點 <span class="muted" style="font-size:11px;">（選填）</span></label>
+          <input class="form-input" type="number" id="fut-tp" placeholder="例：18500" step="0.01">
+        </div>
+      </div>
+
+      <!-- 備註 -->
+      <div class="form-group">
+        <label class="form-label">備註</label>
+        <input class="form-input" type="text" id="fut-note" placeholder="（選填）策略名稱、進場理由...">
+      </div>
+
+      <!-- 試算區 -->
+      <div id="fut-preview" style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.3); border-radius:8px; padding:12px; margin-top:8px;">
+        <div style="font-weight:600; color:#a5b4fc; margin-bottom:8px;">💡 試算 & 風險評估</div>
+        <div id="fut-preview-content" style="font-size:13px; line-height:1.8;">
+          <span class="muted">請選擇商品並輸入價格...</span>
+        </div>
+      </div>
+    `;
+
+    const footerHtml = `
+      <button class="btn btn-secondary" data-close>取消</button>
+      <button class="btn btn-primary" id="fut-submit">🎯 確認開倉</button>
+    `;
+
+    const modal = this._buildModal('futures-open-modal', '🎯 期貨開倉', bodyHtml, footerHtml);
+
+    const $ = sel => modal.querySelector(sel);
+    const $symbol = $('#fut-symbol');
+    const $expiry = $('#fut-expiry');
+    const $lots = $('#fut-lots');
+    const $price = $('#fut-price');
+    const $date = $('#fut-date');
+    const $feeManual = $('#fut-fee-manual');
+    const $fee = $('#fut-fee');
+    const $sl = $('#fut-sl');
+    const $tp = $('#fut-tp');
+    const $note = $('#fut-note');
+    const $preview = $('#fut-preview-content');
+    const $submit = $('#fut-submit');
+
+    const getDir = () => modal.querySelector('input[name="fdir"]:checked').value;
+
+    // ---------- 試算 ----------
+    const updatePreview = () => {
+      const sym = $symbol.value;
+      const c = FuturesHelper.getContract(sym);
+      if (!c) {
+        $preview.innerHTML = '<span class="down">❌ 找不到合約規格</span>';
+        return;
+      }
+
+      const dir = getDir();
+      const lots = Number($lots.value) || 0;
+      const price = Number($price.value) || 0;
+
+      if (lots <= 0 || price <= 0) {
+        $preview.innerHTML = '<span class="muted">請輸入口數與建倉價...</span>';
+        return;
+      }
+
+      const contractValue = FuturesHelper.calcContractValue(sym, price, lots);
+      const requiredMargin = FuturesHelper.calcRequiredMargin(sym, lots, 'initial');
+      const maintMargin = FuturesHelper.calcRequiredMargin(sym, lots, 'maintenance');
+      const autoFee = c.feePerLot * lots * 2;
+      const fee = $feeManual.checked ? (Number($fee.value) || 0) : autoFee;
+      if (!$feeManual.checked) $fee.value = autoFee;
+      const tax = Math.round(contractValue * c.taxRate * 2);
+      const totalCost = fee + tax;
+
+      const pnlPerPoint = FuturesHelper.calcPnLPerPoint(sym, lots);
+      const liquidPts = FuturesHelper.calcLiquidationPoints(sym, lots);
+      const liquidPrice = dir === 'long'
+        ? (price - liquidPts).toFixed(2)
+        : (price + liquidPts).toFixed(2);
+
+      // 停損 / 停利損益
+      let slPnL = null, tpPnL = null;
+      const slVal = Number($sl.value);
+      const tpVal = Number($tp.value);
+      if (slVal > 0) {
+        slPnL = dir === 'long'
+          ? (slVal - price) * pnlPerPoint - totalCost
+          : (price - slVal) * pnlPerPoint - totalCost;
+      }
+      if (tpVal > 0) {
+        tpPnL = dir === 'long'
+          ? (tpVal - price) * pnlPerPoint - totalCost
+          : (price - tpVal) * pnlPerPoint - totalCost;
+      }
+
+      // 風險警告：檢查資金是否充足（這裡先用簡化邏輯）
+      const settings = (Store.getSettings && Store.getSettings()) || {};
+      const availCapital = settings.availableCapital || 0;
+      let warningHtml = '';
+      if (availCapital > 0 && requiredMargin > availCapital) {
+        warningHtml = `
+          <div style="background:rgba(239,68,68,0.15); border:1px solid #ef4444; border-radius:6px; padding:8px; margin-top:8px;">
+            ⚠️ <strong class="down">保證金不足！</strong> 需要 ${this._fmt(requiredMargin)}，可用資金僅 ${this._fmt(availCapital)}
+          </div>
+        `;
+      }
+
+      $preview.innerHTML = `
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px 16px;">
+          <div>📦 契約乘數：<strong>${c.multiplier} 元/點</strong></div>
+          <div>💎 1 點價值：<strong>${this._fmt(pnlPerPoint)}</strong></div>
+          <div>📊 契約總值：<strong>${this._fmt(contractValue)}</strong></div>
+          <div>🔒 原始保證金：<strong style="color:#fbbf24;">${this._fmt(requiredMargin)}</strong></div>
+          <div>🚨 維持保證金：<strong>${this._fmt(maintMargin)}</strong></div>
+          <div>💥 預估強平價：<strong class="down">${liquidPrice}</strong> <span class="muted">(${liquidPts}點)</span></div>
+          <div>🧾 手續費（雙邊）：<strong>${this._fmt(fee)}</strong></div>
+          <div>💰 期交稅（雙邊）：<strong>${this._fmt(tax)}</strong></div>
+        </div>
+        ${(slVal > 0 || tpVal > 0) ? '<hr style="border-color:rgba(255,255,255,0.1); margin:8px 0;">' : ''}
+        ${slVal > 0 ? `<div>🛑 停損 @ <strong>${slVal}</strong> → <strong class="${slPnL >= 0 ? 'up' : 'down'}">${slPnL >= 0 ? '+' : ''}${this._fmt(slPnL)}</strong></div>` : ''}
+        ${tpVal > 0 ? `<div>🎯 停利 @ <strong>${tpVal}</strong> → <strong class="${tpPnL >= 0 ? 'up' : 'down'}">${tpPnL >= 0 ? '+' : ''}${this._fmt(tpPnL)}</strong></div>` : ''}
+        ${(slVal > 0 && tpVal > 0) ? `
+          <div style="margin-top:6px; padding-top:6px; border-top:1px dashed rgba(255,255,255,0.1);">
+            ⚖️ 風險報酬比：<strong>${slPnL && tpPnL ? Math.abs(tpPnL / slPnL).toFixed(2) : '—'}</strong>
+          </div>
+        ` : ''}
+        ${warningHtml}
+      `;
+    };
+
+    // ---------- 事件 ----------
+    [$symbol, $lots, $price, $fee, $sl, $tp].forEach(el => {
+      el.addEventListener('input', updatePreview);
+      el.addEventListener('change', updatePreview);
+    });
+    modal.querySelectorAll('input[name="fdir"]').forEach(r => {
+      r.addEventListener('change', updatePreview);
+    });
+    $feeManual.addEventListener('change', () => {
+      $fee.disabled = !$feeManual.checked;
+      if (!$feeManual.checked) updatePreview();
+      else $fee.focus();
+    });
+
+    // ---------- 提交 ----------
+    $submit.addEventListener('click', () => {
+      const sym = $symbol.value;
+      const c = FuturesHelper.getContract(sym);
+      if (!c) { this._toast('找不到合約', 'error'); return; }
+
+      const dir = getDir();
+      const expiry = $expiry.value;
+      const lots = Number($lots.value) || 0;
+      const price = Number($price.value) || 0;
+      const date = $date.value;
+      const fee = Number($fee.value) || (c.feePerLot * lots * 2);
+      const sl = Number($sl.value) || 0;
+      const tp = Number($tp.value) || 0;
+      const note = $note.value.trim();
+
+      if (lots <= 0) { this._toast('口數必須大於 0', 'error'); $lots.focus(); return; }
+      if (price <= 0) { this._toast('價格必須大於 0', 'error'); $price.focus(); return; }
+
+      $submit.disabled = true;
+      $submit.textContent = '處理中...';
+
+      try {
+        const payload = {
+          symbol: sym,
+          name: c.name,
+          contractMonth: expiry,
+          type: dir,                  // 'long' | 'short'
+          lots: lots,
+          price: price,
+          multiplier: c.multiplier,
+          initialMargin: c.initialMargin * lots,
+          maintenanceMargin: c.maintenanceMargin * lots,
+          fee: fee,
+          stopLoss: sl || null,
+          takeProfit: tp || null,
+          date: date,
+          note: note,
+          market: 'TW'
+        };
+
+        console.log('[TradeModal] FUTURES_OPEN payload:', payload);
+
+        Store.dispatch({
+          type: 'FUTURES_OPEN',
+          payload: payload
+        });
+
+        const action = dir === 'long' ? '買進開倉' : '賣出開倉';
+        this._toast(`✅ ${c.name} ${action} ${lots} 口 @ ${price}`, 'success');
+        modal._close();
+
+        if (typeof UI !== 'undefined' && typeof UI.renderFutures === 'function') {
+          UI.renderFutures();
+        }
+      } catch (err) {
+        console.error('[TradeModal] FUTURES_OPEN 失敗:', err);
+        this._toast('開倉失敗：' + err.message, 'error');
+        $submit.disabled = false;
+        $submit.textContent = '🎯 確認開倉';
+      }
+    });
+
+    updatePreview();
+    setTimeout(() => $price.focus(), 100);
   }
+
 
 };
 

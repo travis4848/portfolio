@@ -470,7 +470,6 @@ const Store = {
           }
         );
         this.state.history.transactions.push(tx);
-        
         // 用 FuturesHelper 補齊 isStockFutures / underlyingSymbol
         let isStockFutures = false;
         let underlyingSymbol = '';

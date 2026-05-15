@@ -3,7 +3,7 @@
  * ============================================================
  * 用途：
  *   - 集中管理所有交易 Modal（融資、融券、期貨、現股）
- *   - 提供即時試算、自動查詢股票名稱、手續費計算
+ *   - 提供即時試算、智慧自動完成、手續費計算
  * 依賴：CONFIG, Store, Storage, StockDB, UI（toast）
  * 對外：TradeModal（全域變數）
  * ============================================================ */
@@ -15,7 +15,6 @@ const TradeModal = {
   // 🔧 共用工具
   // ============================================================
 
-  // toast 統一用 UI.toast（與專案一致）
   _toast(msg, type = 'success') {
     if (typeof UI !== 'undefined' && UI.toast) {
       UI.toast(msg, type);
@@ -24,87 +23,197 @@ const TradeModal = {
     }
   },
 
-  // 數字格式化
   _fmt(n) {
     if (typeof n !== 'number' || isNaN(n)) return '0';
     return Math.round(n).toLocaleString('zh-TW');
   },
 
-  // 🔍 查詢股票名稱（StockDB → portfolio → Yahoo API）
-  async fetchStockName(symbol) {
-    if (!symbol) return null;
-    const sym = String(symbol).trim().toUpperCase();
-    if (!sym) return null;
+  // ============================================================
+  // 🔍 智慧搜尋（從 StockDB 模糊比對代號或名稱）
+  // ============================================================
+  searchStocks(keyword, limit = 8) {
+    if (!keyword || typeof StockDB === 'undefined' || !StockDB.stocks) return [];
 
-    // 1. 先從 StockDB 找
-    if (typeof StockDB !== 'undefined' && StockDB.getStock) {
-      const s = StockDB.getStock(sym);
-      if (s && s.name) return s.name;
-    }
+    const kw = String(keyword).trim().toUpperCase();
+    if (!kw) return [];
 
-    // 2. 從 portfolio 內現有資料找
-    const portfolio = Store.getPortfolio();
-    if (portfolio) {
-      const local =
-        (portfolio.stocks || []).find(s => String(s.symbol).toUpperCase() === sym) ||
-        (portfolio.watchlist || []).find(w => String(w.symbol).toUpperCase() === sym) ||
-        (portfolio.margin || []).find(m => String(m.symbol).toUpperCase() === sym);
-      if (local && local.name) return local.name;
-    }
+    const all = StockDB.stocks;
+    const exact = [];      // 代號完全相符（最優先）
+    const startsCode = []; // 代號開頭符合
+    const startsName = []; // 名稱開頭符合
+    const includes = [];   // 名稱或代號包含
 
-    // 3. 從 Yahoo Finance Quote API 抓（透過 allorigins 代理避開 CORS）
-    try {
-      const yahooSymbol = sym.includes('.') ? sym : `${sym}.TW`;
-      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(yahooSymbol)}`;
-      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-      const resp = await fetch(proxyUrl);
-      const data = await resp.json();
-      const inner = JSON.parse(data.contents);
-      const quote = inner?.quoteResponse?.result?.[0];
-      if (quote && (quote.shortName || quote.longName)) {
-        return quote.shortName || quote.longName;
+    for (const code in all) {
+      const item = all[code];
+      const symbolUpper = code.toUpperCase();
+      const name = item.name || '';
+      const nameUpper = name.toUpperCase();
+
+      if (symbolUpper === kw) {
+        exact.push({ symbol: code, name });
+      } else if (symbolUpper.startsWith(kw)) {
+        startsCode.push({ symbol: code, name });
+      } else if (nameUpper.startsWith(kw) || name.startsWith(kw)) {
+        startsName.push({ symbol: code, name });
+      } else if (symbolUpper.includes(kw) || nameUpper.includes(kw) || name.includes(kw)) {
+        includes.push({ symbol: code, name });
       }
-    } catch (err) {
-      console.warn('[TradeModal] 查詢股票名稱失敗:', err.message);
+
+      // 提早結束（效能優化）
+      if (exact.length + startsCode.length + startsName.length + includes.length >= limit * 3) break;
     }
-    return null;
+
+    // 合併、依優先序、限制數量
+    return [...exact, ...startsCode, ...startsName, ...includes].slice(0, limit);
   },
 
-  // ⚡ 抓即時報價（優先用 PriceFetcher，沒有就走 Yahoo）
+  // ============================================================
+  // ⚡ 抓即時報價（用 PriceFetcher）
+  // ============================================================
   async fetchStockPrice(symbol) {
     if (!symbol) return null;
     const sym = String(symbol).trim().toUpperCase();
 
-    // 優先使用專案的 PriceFetcher（有快取）
     if (typeof PriceFetcher !== 'undefined' && PriceFetcher.fetchOne) {
       try {
         const r = await PriceFetcher.fetchOne(sym, 'TW', { useCache: false });
         if (r && r.price != null && !isNaN(r.price)) return Number(r.price);
       } catch (err) {
-        console.warn('[TradeModal] PriceFetcher 失敗，改用 Yahoo:', err.message);
+        console.warn('[TradeModal] PriceFetcher 失敗:', err.message);
+        return null;
       }
     }
-
-    // Fallback：Yahoo
-    try {
-      const yahooSymbol = sym.includes('.') ? sym : `${sym}.TW`;
-      const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(yahooSymbol)}`;
-      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-      const resp = await fetch(proxyUrl);
-      const data = await resp.json();
-      const inner = JSON.parse(data.contents);
-      const quote = inner?.quoteResponse?.result?.[0];
-      const price = quote?.regularMarketPrice ?? quote?.postMarketPrice ?? null;
-      return (price != null && !isNaN(price)) ? Number(price) : null;
-    } catch (err) {
-      console.warn('[TradeModal] 查詢股票報價失敗:', err.message);
-      return null;
-    }
+    return null;
   },
 
-  // 通用：建立 Modal 殼（沿用專案的 .modal-mask / .modal 樣式）
+  // ============================================================
+  // 🎯 自動完成下拉選單（綁定到輸入框）
+  // ============================================================
+  _attachAutocomplete($input, onSelect) {
+    // 建立 dropdown 容器
+    const dropdown = document.createElement('div');
+    dropdown.className = 'tm-autocomplete-dropdown';
+    dropdown.style.cssText = `
+      position: absolute;
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      max-height: 240px;
+      overflow-y: auto;
+      z-index: 10000;
+      display: none;
+      min-width: 220px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    `;
+    document.body.appendChild(dropdown);
+
+    let activeIndex = -1;
+    let currentItems = [];
+
+    const positionDropdown = () => {
+      const rect = $input.getBoundingClientRect();
+      dropdown.style.left = `${rect.left + window.scrollX}px`;
+      dropdown.style.top = `${rect.bottom + window.scrollY + 2}px`;
+      dropdown.style.width = `${rect.width}px`;
+    };
+
+    const renderItems = (items) => {
+      currentItems = items;
+      activeIndex = -1;
+      if (items.length === 0) {
+        dropdown.style.display = 'none';
+        return;
+      }
+      dropdown.innerHTML = items.map((it, i) => `
+        <div class="tm-ac-item" data-idx="${i}" 
+             style="padding:8px 12px; cursor:pointer; display:flex; gap:10px; border-bottom:1px solid #334155;">
+          <strong style="color:#60a5fa; min-width:60px;">${it.symbol}</strong>
+          <span style="color:#e2e8f0;">${it.name}</span>
+        </div>
+      `).join('');
+      positionDropdown();
+      dropdown.style.display = 'block';
+
+      // 綁定點擊
+      dropdown.querySelectorAll('.tm-ac-item').forEach(el => {
+        el.addEventListener('mouseenter', () => setActive(Number(el.dataset.idx)));
+        el.addEventListener('mousedown', (e) => {
+          // 用 mousedown 而不是 click，避免 input blur 先觸發
+          e.preventDefault();
+          select(Number(el.dataset.idx));
+        });
+      });
+    };
+
+    const setActive = (idx) => {
+      activeIndex = idx;
+      dropdown.querySelectorAll('.tm-ac-item').forEach((el, i) => {
+        el.style.background = (i === idx) ? '#334155' : 'transparent';
+      });
+    };
+
+    const select = (idx) => {
+      if (idx < 0 || idx >= currentItems.length) return;
+      const item = currentItems[idx];
+      dropdown.style.display = 'none';
+      onSelect(item);
+    };
+
+    // input 事件
+    let timer = null;
+    $input.addEventListener('input', () => {
+      clearTimeout(timer);
+      const kw = $input.value.trim();
+      if (!kw) {
+        dropdown.style.display = 'none';
+        return;
+      }
+      timer = setTimeout(() => {
+        const items = TradeModal.searchStocks(kw, 8);
+        renderItems(items);
+      }, 100);
+    });
+
+    // 鍵盤操作
+    $input.addEventListener('keydown', (e) => {
+      if (dropdown.style.display === 'none') return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setActive(Math.min(activeIndex + 1, currentItems.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActive(Math.max(activeIndex - 1, 0));
+      } else if (e.key === 'Enter') {
+        if (activeIndex >= 0) {
+          e.preventDefault();
+          select(activeIndex);
+        }
+      } else if (e.key === 'Escape') {
+        dropdown.style.display = 'none';
+      }
+    });
+
+    // blur 隱藏
+    $input.addEventListener('blur', () => {
+      setTimeout(() => { dropdown.style.display = 'none'; }, 150);
+    });
+
+    // 視窗滾動/resize 重新定位
+    window.addEventListener('scroll', positionDropdown, true);
+    window.addEventListener('resize', positionDropdown);
+
+    // 回傳銷毀函式
+    return () => {
+      dropdown.remove();
+      window.removeEventListener('scroll', positionDropdown, true);
+      window.removeEventListener('resize', positionDropdown);
+    };
+  },
+
+  // ============================================================
+  // 通用：建立 Modal 殼
+  // ============================================================
   _buildModal(id, title, bodyHtml, footerHtml) {
-    // 移除舊的（避免重複）
     const old = document.getElementById(id);
     if (old) old.remove();
 
@@ -123,22 +232,27 @@ const TradeModal = {
     `;
     document.body.appendChild(wrapper);
 
-    // 關閉按鈕
+    const cleanups = [];
+
     wrapper.querySelectorAll('[data-close]').forEach(btn => {
-      btn.addEventListener('click', () => wrapper.remove());
+      btn.addEventListener('click', () => closeModal());
     });
-    // 點背景關閉
     wrapper.addEventListener('click', (e) => {
-      if (e.target === wrapper) wrapper.remove();
+      if (e.target === wrapper) closeModal();
     });
-    // ESC 關閉
     const escHandler = (e) => {
-      if (e.key === 'Escape') {
-        wrapper.remove();
-        document.removeEventListener('keydown', escHandler);
-      }
+      if (e.key === 'Escape') closeModal();
     };
     document.addEventListener('keydown', escHandler);
+
+    function closeModal() {
+      cleanups.forEach(fn => { try { fn(); } catch (e) {} });
+      document.removeEventListener('keydown', escHandler);
+      wrapper.remove();
+    }
+
+    wrapper._addCleanup = (fn) => cleanups.push(fn);
+    wrapper._close = closeModal;
 
     return wrapper;
   },
@@ -164,29 +278,33 @@ const TradeModal = {
         </div>
       </div>
 
-      <div class="form-row">
-        <div class="form-group" style="flex:2;">
-          <label class="form-label">股票代號 *</label>
-          <input class="form-input" type="text" id="mtm-symbol" placeholder="例：2330" value="${defaultSymbol}" style="text-transform:uppercase;">
-        </div>
-        <div class="form-group" style="flex:1;">
-          <label class="form-label">&nbsp;</label>
-          <button type="button" id="mtm-lookup" class="btn btn-secondary" style="width:100%;">🔍 查詢</button>
-        </div>
-      </div>
-
       <div class="form-group">
-        <label class="form-label">股票名稱</label>
-        <input class="form-input" type="text" id="mtm-name" placeholder="（自動帶出，可手動修改）">
+        <label class="form-label">股票代號 / 名稱 <span style="color:#ef4444;">*</span> 
+          <span class="muted" style="font-size:11px; font-weight:normal;">（輸入代號或名稱，例：2330 或 台積）</span>
+        </label>
+        <input class="form-input" type="text" id="mtm-search" 
+               placeholder="輸入代號或公司名稱..." autocomplete="off">
       </div>
 
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">股數 *</label>
+          <label class="form-label">股票代號</label>
+          <input class="form-input" type="text" id="mtm-symbol" placeholder="自動帶入" 
+                 style="text-transform:uppercase;" value="${defaultSymbol}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">股票名稱</label>
+          <input class="form-input" type="text" id="mtm-name" placeholder="自動帶入">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">股數 <span style="color:#ef4444;">*</span></label>
           <input class="form-input" type="number" id="mtm-shares" placeholder="1000" min="0" step="1000">
         </div>
         <div class="form-group">
-          <label class="form-label">價格 *</label>
+          <label class="form-label">價格 <span style="color:#ef4444;">*</span></label>
           <div style="display:flex; gap:4px;">
             <input class="form-input" type="number" id="mtm-price" placeholder="0.00" min="0" step="0.01" style="flex:1;">
             <button type="button" id="mtm-fetch-price" class="btn btn-warning" style="padding:0 10px; white-space:nowrap;" title="抓取即時報價">⚡</button>
@@ -215,11 +333,10 @@ const TradeModal = {
         <input class="form-input" type="text" id="mtm-note" placeholder="（選填）">
       </div>
 
-      <!-- 試算區 -->
       <div id="mtm-preview" style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.3); border-radius:8px; padding:12px; margin-top:8px;">
         <div style="font-weight:600; color:#a5b4fc; margin-bottom:8px;">💡 試算</div>
         <div id="mtm-preview-content" style="font-size:13px; line-height:1.8;">
-          請輸入股數與價格...
+          <span class="muted">請輸入股數與價格...</span>
         </div>
       </div>
     `;
@@ -231,10 +348,10 @@ const TradeModal = {
 
     const modal = this._buildModal('margin-open-modal', '💎 融資 / 融券 開倉', bodyHtml, footerHtml);
 
-    // ---------- 元件參考 ----------
     const $ = sel => modal.querySelector(sel);
     const getType = () => $('input[name="mtype"]:checked').value;
 
+    const $search = $('#mtm-search');
     const $symbol = $('#mtm-symbol');
     const $name = $('#mtm-name');
     const $shares = $('#mtm-shares');
@@ -243,7 +360,6 @@ const TradeModal = {
     const $feeManual = $('#mtm-fee-manual');
     const $fee = $('#mtm-fee');
     const $note = $('#mtm-note');
-    const $lookup = $('#mtm-lookup');
     const $fetchPrice = $('#mtm-fetch-price');
     const $previewContent = $('#mtm-preview-content');
     const $submit = $('#mtm-submit');
@@ -260,18 +376,14 @@ const TradeModal = {
       }
 
       const subtotal = shares * price;
-      // 手續費折扣（從 settings 或 CONFIG 拿，預設 0.28）
       const settings = (Store.getSettings && Store.getSettings()) || {};
-      const discount = settings.brokerFeeDiscount
-                    ?? CONFIG?.BROKER_FEE_DISCOUNT
-                    ?? 0.28;
+      const discount = settings.brokerFeeDiscount ?? CONFIG?.BROKER_FEE_DISCOUNT ?? 0.28;
       const feeRate = CONFIG?.BROKER_FEE_RATE ?? 0.001425;
       const minFee = CONFIG?.BROKER_FEE_MIN ?? 20;
       const autoFee = Math.max(minFee, Math.round(subtotal * feeRate * discount));
       const fee = $feeManual.checked ? (Number($fee.value) || 0) : autoFee;
       if (!$feeManual.checked) $fee.value = autoFee;
 
-      // 融資 / 融券 設定（盡量從 CONFIG.MARGIN 讀）
       const cfg = (CONFIG.MARGIN && CONFIG.MARGIN[type === 'long' ? 'LONG' : 'SHORT']) || {};
 
       let html = '';
@@ -306,7 +418,26 @@ const TradeModal = {
       $previewContent.innerHTML = html;
     };
 
-    // ---------- 事件綁定 ----------
+    // ---------- 自動完成 ----------
+    const cleanupAC = this._attachAutocomplete($search, (item) => {
+      $symbol.value = item.symbol;
+      $name.value = item.name;
+      $search.value = `${item.symbol}  ${item.name}`;
+      // 自動 focus 到股數
+      setTimeout(() => $shares.focus(), 50);
+    });
+    modal._addCleanup(cleanupAC);
+
+    // 如果有 defaultSymbol，嘗試自動帶名稱
+    if (defaultSymbol && typeof StockDB !== 'undefined' && StockDB.getStock) {
+      const found = StockDB.getStock(defaultSymbol);
+      if (found && found.name) {
+        $name.value = found.name;
+        $search.value = `${defaultSymbol}  ${found.name}`;
+      }
+    }
+
+    // ---------- 事件 ----------
     modal.querySelectorAll('input[name="mtype"]').forEach(r => {
       r.addEventListener('change', updatePreview);
     });
@@ -314,44 +445,17 @@ const TradeModal = {
       el.addEventListener('input', updatePreview);
     });
 
-    // 手續費手動切換
     $feeManual.addEventListener('change', () => {
       $fee.disabled = !$feeManual.checked;
       if (!$feeManual.checked) updatePreview();
       else $fee.focus();
     });
 
-    // 🔍 查詢股票名稱
-    const doLookup = async () => {
-      const sym = $symbol.value.trim().toUpperCase();
-      if (!sym) {
-        this._toast('請先輸入股票代號', 'warning');
-        return;
-      }
-      $lookup.disabled = true;
-      $lookup.textContent = '⏳ 查詢中';
-      try {
-        const name = await this.fetchStockName(sym);
-        if (name) {
-          $name.value = name;
-          this._toast(`✅ 已帶入：${name}`, 'success');
-        } else {
-          this._toast('找不到該代號，請手動輸入名稱', 'warning');
-        }
-      } catch (err) {
-        this._toast('查詢失敗：' + err.message, 'error');
-      } finally {
-        $lookup.disabled = false;
-        $lookup.textContent = '🔍 查詢';
-      }
-    };
-    $lookup.addEventListener('click', doLookup);
-
     // ⚡ 抓即時報價
     $fetchPrice.addEventListener('click', async () => {
-      const sym = $symbol.value.trim().toUpperCase();
+      const sym = ($symbol.value || '').trim().toUpperCase();
       if (!sym) {
-        this._toast('請先輸入股票代號', 'warning');
+        this._toast('請先選擇股票', 'warning');
         return;
       }
       $fetchPrice.disabled = true;
@@ -363,7 +467,7 @@ const TradeModal = {
           updatePreview();
           this._toast(`✅ 已帶入即時價：${p}`, 'success');
         } else {
-          this._toast('抓取報價失敗', 'warning');
+          this._toast('抓取報價失敗（PriceFetcher 無回應）', 'warning');
         }
       } catch (err) {
         this._toast('查詢失敗：' + err.message, 'error');
@@ -373,27 +477,18 @@ const TradeModal = {
       }
     });
 
-    // 代號 blur 時自動查詢名稱（如果名稱還空著）
-    $symbol.addEventListener('blur', () => {
-      const sym = $symbol.value.trim().toUpperCase();
-      if (sym && !$name.value.trim()) {
-        doLookup();
-      }
-    });
-
     // ---------- 提交 ----------
     $submit.addEventListener('click', () => {
       const type = getType();
-      const symbol = $symbol.value.trim().toUpperCase();
-      const name = $name.value.trim();
+      const symbol = ($symbol.value || '').trim().toUpperCase();
+      const name = ($name.value || '').trim();
       const shares = Number($shares.value) || 0;
       const price = Number($price.value) || 0;
       const date = $date.value;
       const fee = Number($fee.value) || 0;
       const note = $note.value.trim();
 
-      // 驗證
-      if (!symbol) { this._toast('請輸入股票代號', 'error'); $symbol.focus(); return; }
+      if (!symbol) { this._toast('請選擇股票', 'error'); $search.focus(); return; }
       if (shares <= 0) { this._toast('股數必須大於 0', 'error'); $shares.focus(); return; }
       if (price <= 0) { this._toast('價格必須大於 0', 'error'); $price.focus(); return; }
       if (!date) { this._toast('請選擇日期', 'error'); return; }
@@ -402,27 +497,19 @@ const TradeModal = {
       $submit.textContent = '處理中...';
 
       try {
-        // dispatch（沿用你既有的 MARGIN_BUY action）
         Store.dispatch({
           type: 'MARGIN_BUY',
           payload: {
-            symbol,
-            name: name || symbol,
-            type,            // 'long' or 'short'
-            shares,
-            price,
-            fee,
-            date,
-            note,
+            symbol, name: name || symbol,
+            type, shares, price, fee, date, note,
             market: 'TW'
           }
         });
 
         const action = type === 'long' ? '融資買進' : '融券賣出';
         this._toast(`✅ ${action} ${symbol} ${this._fmt(shares)} 股 @ ${price}`, 'success');
-        modal.remove();
+        modal._close();
 
-        // 觸發 UI 重繪
         if (typeof UI !== 'undefined' && typeof UI.renderMargin === 'function') {
           UI.renderMargin();
         }
@@ -434,13 +521,10 @@ const TradeModal = {
       }
     });
 
-    // 初始試算 + focus
     updatePreview();
-    setTimeout(() => $symbol.focus(), 100);
+    setTimeout(() => $search.focus(), 100);
   }
 };
 
-// 全域曝露
 window.TradeModal = TradeModal;
-
-console.log('[16-trade-modal.js] ✅ TradeModal 已載入');
+console.log('[16-trade-modal.js] ✅ TradeModal 已載入（含智慧搜尋）');

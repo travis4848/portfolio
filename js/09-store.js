@@ -475,100 +475,81 @@ const Store = {
       }
 
       case 'FUTURES_CLOSE': {
-        // payload: { id, contracts, price, fee, date, note }
-        const list = this.state.portfolio.futures || [];
-        const pos = list.find(f => f.id === payload.id);
-        if (!pos) {
-          console.warn('[Store] FUTURES_CLOSE: 找不到', payload.id);
-          return null;
-        }
+        // payload: { id, lots, price, fee, date, note }
+        if (!this.state.portfolio.futures) this.state.portfolio.futures = [];
+        const list = this.state.portfolio.futures;
+        const idx = list.findIndex(p => p.id === payload.id);
+        if (idx < 0) throw new Error('找不到期貨部位：' + payload.id);
 
-        const productCfg = CONFIG.FUTURES?.PRODUCTS?.[pos.product]
-                        || CONFIG.FUTURES?.STOCK_FUT_TEMPLATES?.[pos.product]
-                        || {};
-        // 一點價值（指數）/ 契約規模（個股期）
-        const pointValue = productCfg.pointValue
-                        || productCfg.multiplier
-                        || productCfg.contractSize
-                        || 200;
-        const fee = payload.fee != null
-          ? Number(payload.fee)
-          : (productCfg.feePerLot || 30) * payload.contracts;
+        const pos = list[idx];
+        const closeLots = Math.min(Number(payload.lots) || 0, pos.lots);
+        if (closeLots <= 0) throw new Error('平倉口數必須大於 0');
 
-        // FIFO 平倉
-        let remainingToClose = Number(payload.contracts) || 0;
-        let totalPnl = 0;
-        let releasedMargin = 0;
+        const closePrice = Number(payload.price) || 0;
+        const closeFee = Number(payload.fee) || 0;
+        const multiplier = pos.multiplier || 1;
 
-        const sortedLots = [...pos.lots].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-        const newLots = [];
+        // 計算毛損益（不含手續費）
+        const pointDiff = pos.type === 'long'
+          ? (closePrice - pos.avgPrice)
+          : (pos.avgPrice - closePrice);
+        const grossPnl = pointDiff * multiplier * closeLots;
 
-        sortedLots.forEach(lot => {
-          const lotCons = Number(lot.remaining ?? lot.contracts) || 0;
-          if (remainingToClose <= 0 || lotCons <= 0) {
-            newLots.push(lot);
-            return;
-          }
-          const close = Math.min(lotCons, remainingToClose);
-          // 多單：現價 > 進場價 賺；空單反之
-          const points = pos.direction === 'long'
-            ? (payload.price - lot.price)
-            : (lot.price - payload.price);
-          totalPnl += points * pointValue * close;
+        // 期交稅（平倉那邊）
+        const contractValue = closePrice * multiplier * closeLots;
+        const taxRate = 0.00002; // 簡化：用統一稅率
+        const tax = Math.round(contractValue * taxRate);
 
-          // 釋放保證金（按比例）
-          if (lotCons > 0) {
-            releasedMargin += (Number(lot.margin) || 0) * (close / lotCons);
-          }
-          remainingToClose -= close;
+        const netPnl = grossPnl - closeFee - tax;
 
-          const newRemaining = lotCons - close;
-          if (newRemaining > 0) {
-            newLots.push({
-              ...lot,
-              remaining: newRemaining,
-              margin: (Number(lot.margin) || 0) * (newRemaining / Math.max(lotCons, 1))
-            });
-          }
-          // newRemaining === 0 就不 push（lot 完全平倉）
-        });
+        // 累計已實現損益（含過去部分平倉的）
+        pos.realizedPnl = (pos.realizedPnl || 0) + netPnl;
 
-        // 扣手續費和期交稅
-        const tax = (payload.contracts * payload.price * pointValue) * (productCfg.taxRate || 0.00002);
-        totalPnl -= (fee + tax);
-
-        pos.lots = newLots;
-        pos.realizedPnl = (Number(pos.realizedPnl) || 0) + totalPnl;
-        pos.marginUsed = Math.max(0, (pos.marginUsed || 0) - releasedMargin);
-
-        // 重算 totalContracts / avgPrice
-        let totalCon = 0, totalNotion = 0;
-        pos.lots.forEach(l => {
-          const c = Number(l.remaining ?? l.contracts) || 0;
-          totalCon += c;
-          totalNotion += c * (Number(l.price) || 0);
-        });
-        pos.totalContracts = totalCon;
-        pos.avgPrice = totalCon > 0 ? totalNotion / totalCon : 0;
-
-        // 全部平倉就移除
-        if (pos.lots.length === 0) {
-          this.state.portfolio.futures = list.filter(f => f.id !== pos.id);
+        // 部分平倉 / 全部平倉
+        if (closeLots >= pos.lots) {
+          // 全部平倉 → 從持倉移除，搬到 closedFutures 歷史
+          if (!this.state.history.closedFutures) this.state.history.closedFutures = [];
+          this.state.history.closedFutures.push({
+            ...pos,
+            closeDate: payload.date,
+            closePrice: closePrice,
+            closedLots: closeLots,
+            closeFee: closeFee,
+            closeTax: tax,
+            finalPnl: pos.realizedPnl,
+            closedAt: Date.now()
+          });
+          list.splice(idx, 1);
+        } else {
+          // 部分平倉 → 減少口數，按比例減保證金
+          const ratio = (pos.lots - closeLots) / pos.lots;
+          pos.initialMargin = Math.round(pos.initialMargin * ratio);
+          pos.maintenanceMargin = Math.round(pos.maintenanceMargin * ratio);
+          pos.lots = pos.lots - closeLots;
         }
 
         // 記錄交易
         const tx = DataStructure.createTransaction(
-          pos.direction === 'long' ? 'FUT_LONG_CLOSE' : 'FUT_SHORT_CLOSE',
+          'FUTURES_CLOSE',
           'futures',
-          pos.contract,
+          pos.symbol,
           pos.name,
-          payload.contracts,
-          payload.price,
-          { fee, tax, realizedPnl: totalPnl, note: payload.note || '', product: pos.product }
+          closeLots,
+          closePrice,
+          {
+            fee: closeFee,
+            tax: tax,
+            grossPnl: grossPnl,
+            netPnl: netPnl,
+            direction: pos.type,
+            contractMonth: pos.contractMonth,
+            avgOpenPrice: pos.avgPrice,
+            note: payload.note || ''
+          }
         );
         this.state.history.transactions.push(tx);
 
-        return { position: pos, transaction: tx, realizedPnl: totalPnl };
+        return { closedLots: closeLots, grossPnl, netPnl, tax };
       }
 
       case 'STOCK_UPDATE_PRICE': {

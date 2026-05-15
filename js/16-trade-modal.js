@@ -903,7 +903,7 @@ const TradeModal = {
 
     updatePreview();
     setTimeout(() => $shares.focus(), 100);
-  }  ,
+  },
 
   // ============================================================
   // 🎯 開啟「期貨開倉」Modal（含智慧搜尋）
@@ -1340,6 +1340,283 @@ const TradeModal = {
 
     setTimeout(() => $search.focus(), 100);
   },
+
+  // ============================================================
+  // 🎯 開啟「期貨平倉」Modal
+  // ============================================================
+  openFuturesCloseModal({ positionId } = {}) {
+    if (!positionId) {
+      this._toast('❌ 缺少持倉 ID', 'error');
+      return;
+    }
+
+    // 取得持倉
+    const futures = (Store.getFutures && Store.getFutures()) || [];
+    const pos = futures.find(p => p.id === positionId);
+    if (!pos) {
+      this._toast('❌ 找不到該期貨部位', 'error');
+      return;
+    }
+
+    const c = (typeof FuturesHelper !== 'undefined') ? FuturesHelper.getContract(pos.symbol) : null;
+    const today = new Date().toISOString().slice(0, 10);
+    const dirLabel = pos.type === 'long'
+      ? '<span class="up">📈 多單</span>'
+      : '<span class="down">📉 空單</span>';
+    const closeAction = pos.type === 'long' ? '賣出平倉' : '買回平倉';
+
+    const bodyHtml = `
+      <!-- 持倉摘要 -->
+      <div style="background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.3); border-radius:8px; padding:12px; margin-bottom:12px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; font-size:13px;">
+          <div>📦 商品：<strong>${pos.symbol}</strong> ${pos.name || ''}</div>
+          <div>🎯 方向：${dirLabel}</div>
+          <div>📊 持有口數：<strong>${pos.lots}</strong> 口</div>
+          <div>💵 建倉均價：<strong>${pos.avgPrice}</strong></div>
+          <div>📅 結算月：<strong>${pos.contractMonth || '—'}</strong></div>
+          <div>💎 現價：<strong id="fc-current-price">${pos.currentPrice || pos.avgPrice}</strong></div>
+          <div>🔒 保證金：<strong>${this._fmt(pos.initialMargin || 0)}</strong></div>
+          <div>📦 乘數：<strong>${pos.multiplier} ${pos.isStockFutures ? '股' : '元/點'}</strong></div>
+        </div>
+      </div>
+
+      <!-- 平倉口數 + 價格 -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">
+            平倉口數 <span style="color:#ef4444;">*</span>
+            <button type="button" id="fc-all" class="btn btn-secondary" 
+                    style="padding:2px 8px; font-size:11px; margin-left:6px;">全部</button>
+          </label>
+          <input class="form-input" type="number" id="fc-lots" 
+                 min="1" max="${pos.lots}" step="1" value="${pos.lots}">
+          <div class="muted" style="font-size:11px; margin-top:2px;">最多 ${pos.lots} 口</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">平倉價格 <span style="color:#ef4444;">*</span></label>
+          <div style="display:flex; gap:4px;">
+            <input class="form-input" type="number" id="fc-price" 
+                   placeholder="${pos.currentPrice || pos.avgPrice}" 
+                   value="${pos.currentPrice || pos.avgPrice}" 
+                   min="0" step="0.01" style="flex:1;">
+            <button type="button" id="fc-fetch-price" class="btn btn-warning" 
+                    style="padding:0 10px;" title="抓取現價">⚡</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 日期 + 手續費 -->
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">平倉日期</label>
+          <input class="form-input" type="date" id="fc-date" value="${today}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            手續費
+            <label style="font-weight:normal; font-size:12px; margin-left:8px; cursor:pointer;">
+              <input type="checkbox" id="fc-fee-manual" style="vertical-align:middle;"> 手動
+            </label>
+          </label>
+          <input class="form-input" type="number" id="fc-fee" placeholder="自動" min="0" step="1" disabled>
+        </div>
+      </div>
+
+      <!-- 備註 -->
+      <div class="form-group">
+        <label class="form-label">備註</label>
+        <input class="form-input" type="text" id="fc-note" placeholder="（選填）平倉理由...">
+      </div>
+
+      <!-- 試算 -->
+      <div id="fc-preview" style="background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.3); border-radius:8px; padding:12px; margin-top:8px;">
+        <div style="font-weight:600; color:#86efac; margin-bottom:8px;">💡 平倉試算</div>
+        <div id="fc-preview-content" style="font-size:13px; line-height:1.8;">
+          <span class="muted">輸入平倉價格...</span>
+        </div>
+      </div>
+    `;
+
+    const footerHtml = `
+      <button class="btn btn-secondary" data-close>取消</button>
+      <button class="btn btn-danger" id="fc-submit">🎯 確認${closeAction}</button>
+    `;
+
+    const modal = this._buildModal('futures-close-modal', `🎯 期貨平倉 - ${pos.symbol} ${pos.name || ''}`, bodyHtml, footerHtml);
+
+    const $ = sel => modal.querySelector(sel);
+    const $lots = $('#fc-lots');
+    const $price = $('#fc-price');
+    const $date = $('#fc-date');
+    const $feeManual = $('#fc-fee-manual');
+    const $fee = $('#fc-fee');
+    const $note = $('#fc-note');
+    const $allBtn = $('#fc-all');
+    const $fetchPrice = $('#fc-fetch-price');
+    const $preview = $('#fc-preview-content');
+    const $submit = $('#fc-submit');
+
+    // ---------- 試算 ----------
+    const updatePreview = () => {
+      const lots = Number($lots.value) || 0;
+      const price = Number($price.value) || 0;
+
+      if (lots <= 0 || price <= 0) {
+        $preview.innerHTML = '<span class="muted">輸入平倉口數與價格...</span>';
+        return;
+      }
+      if (lots > pos.lots) {
+        $preview.innerHTML = `<span class="down">❌ 平倉口數超過持倉（最多 ${pos.lots} 口）</span>`;
+        return;
+      }
+
+      const multiplier = pos.multiplier || 1;
+      const pointDiff = pos.type === 'long' ? (price - pos.avgPrice) : (pos.avgPrice - price);
+      const grossPnl = pointDiff * multiplier * lots;
+
+      const contractValue = price * multiplier * lots;
+      const taxRate = c ? c.taxRate : 0.00002;
+      const tax = Math.round(contractValue * taxRate);
+
+      const autoFee = c ? (c.feePerLot * lots) : (lots * 30);  // 平倉只算單邊
+      const fee = $feeManual.checked ? (Number($fee.value) || 0) : autoFee;
+      if (!$feeManual.checked) $fee.value = autoFee;
+
+      const netPnl = grossPnl - fee - tax;
+      const pnlClass = netPnl >= 0 ? 'up' : 'down';
+
+      // 報酬率（對使用之保證金）
+      const usedMargin = (pos.initialMargin || 0) * (lots / pos.lots);
+      const returnRate = usedMargin > 0 ? (netPnl / usedMargin * 100) : 0;
+
+      // 平倉比例
+      const closeRatio = ((lots / pos.lots) * 100).toFixed(0);
+      const remainingLots = pos.lots - lots;
+
+      $preview.innerHTML = `
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px 16px;">
+          <div>📊 平倉口數：<strong>${lots} / ${pos.lots}</strong> (${closeRatio}%)</div>
+          <div>📦 剩餘口數：<strong>${remainingLots}</strong></div>
+          <div>📈 點數變動：<strong class="${pointDiff >= 0 ? 'up' : 'down'}">${pointDiff >= 0 ? '+' : ''}${pointDiff.toFixed(2)}</strong></div>
+          <div>💎 1點價值：<strong>${this._fmt(multiplier * lots)}</strong></div>
+          <div>💰 毛損益：<strong class="${grossPnl >= 0 ? 'up' : 'down'}">${grossPnl >= 0 ? '+' : ''}${this._fmt(grossPnl)}</strong></div>
+          <div>🧾 手續費：<strong>${this._fmt(fee)}</strong></div>
+          <div>💸 期交稅：<strong>${this._fmt(tax)}</strong></div>
+          <div>🔓 釋出保證金：<strong>${this._fmt(usedMargin)}</strong></div>
+        </div>
+        <hr style="border-color:rgba(255,255,255,0.1); margin:8px 0;">
+        <div style="display:flex; justify-content:space-between; font-size:15px;">
+          <span>🎯 <strong>淨損益：</strong></span>
+          <strong class="${pnlClass}" style="font-size:18px;">
+            ${netPnl >= 0 ? '+' : ''}${this._fmt(netPnl)}
+            <span style="font-size:13px;">(${returnRate >= 0 ? '+' : ''}${returnRate.toFixed(2)}%)</span>
+          </strong>
+        </div>
+        ${remainingLots > 0 ? `
+          <div style="margin-top:6px; padding:6px; background:rgba(251,191,36,0.1); border-radius:4px; font-size:12px;">
+            ℹ️ 部分平倉：剩餘 <strong>${remainingLots} 口</strong>持倉繼續持有
+          </div>
+        ` : `
+          <div style="margin-top:6px; padding:6px; background:rgba(34,197,94,0.1); border-radius:4px; font-size:12px;">
+            ✅ 全部平倉：此部位將從持倉移除
+          </div>
+        `}
+      `;
+    };
+
+    // ---------- 事件 ----------
+    [$lots, $price, $fee].forEach(el => {
+      el.addEventListener('input', updatePreview);
+    });
+    $feeManual.addEventListener('change', () => {
+      $fee.disabled = !$feeManual.checked;
+      if (!$feeManual.checked) updatePreview();
+      else $fee.focus();
+    });
+    $allBtn.addEventListener('click', () => {
+      $lots.value = pos.lots;
+      updatePreview();
+    });
+
+    // ⚡ 抓現價
+    $fetchPrice.addEventListener('click', async () => {
+      const querySym = pos.isStockFutures && pos.underlyingSymbol
+        ? pos.underlyingSymbol
+        : pos.symbol;
+      $fetchPrice.disabled = true;
+      $fetchPrice.textContent = '⏳';
+      try {
+        const p = await this.fetchStockPrice(querySym);
+        if (p != null) {
+          $price.value = p;
+          updatePreview();
+          this._toast(`✅ 已帶入 ${querySym} 現價：${p}`, 'success');
+        } else {
+          this._toast('抓取報價失敗（指數期可能無法直接查詢，請手動輸入）', 'warning');
+        }
+      } catch (err) {
+        this._toast('查詢失敗：' + err.message, 'error');
+      } finally {
+        $fetchPrice.disabled = false;
+        $fetchPrice.textContent = '⚡';
+      }
+    });
+
+    // ---------- 提交 ----------
+    $submit.addEventListener('click', () => {
+      const lots = Number($lots.value) || 0;
+      const price = Number($price.value) || 0;
+      const date = $date.value;
+      const fee = Number($fee.value) || 0;
+      const note = $note.value.trim();
+
+      if (lots <= 0) { this._toast('平倉口數必須大於 0', 'error'); $lots.focus(); return; }
+      if (lots > pos.lots) { this._toast(`平倉口數不能超過 ${pos.lots} 口`, 'error'); $lots.focus(); return; }
+      if (price <= 0) { this._toast('價格必須大於 0', 'error'); $price.focus(); return; }
+
+      $submit.disabled = true;
+      $submit.textContent = '處理中...';
+
+      try {
+        const payload = {
+          id: pos.id,
+          lots: lots,
+          price: price,
+          fee: fee,
+          date: date,
+          note: note
+        };
+
+        console.log('[TradeModal] FUTURES_CLOSE payload:', payload);
+
+        const result = Store.dispatch({
+          type: 'FUTURES_CLOSE',
+          payload: payload
+        });
+
+        const pnlText = result && result.netPnl != null
+          ? (result.netPnl >= 0 ? `獲利 ${this._fmt(result.netPnl)}` : `虧損 ${this._fmt(result.netPnl)}`)
+          : '完成';
+
+        this._toast(`✅ ${pos.name || pos.symbol} 平倉 ${lots} 口 → ${pnlText}`,
+                    result.netPnl >= 0 ? 'success' : 'warning');
+        modal._close();
+
+        if (typeof UI !== 'undefined' && typeof UI.renderFutures === 'function') {
+          UI.renderFutures();
+        }
+      } catch (err) {
+        console.error('[TradeModal] FUTURES_CLOSE 失敗:', err);
+        this._toast('平倉失敗：' + err.message, 'error');
+        $submit.disabled = false;
+        $submit.textContent = `🎯 確認${closeAction}`;
+      }
+    });
+
+    updatePreview();
+    setTimeout(() => $price.focus(), 100);
+  },
+
 
   // ============================================================
   // 🔍 期貨商品自動完成（指數期 + 個股期）

@@ -933,11 +933,11 @@ const TradeModal = {
       <div class="form-group">
         <label class="form-label">期貨商品 <span style="color:#ef4444;">*</span>
           <span class="muted" style="font-size:11px; font-weight:normal;">
-            （指數期：TXF、MXF；個股期：直接輸入股票代號 例 2330）
+            （指數期：TXF、MXF；個股期：CDF台積、CEF鴻海，或輸入「2330」「台積」自動找）
           </span>
         </label>
         <input class="form-input" type="text" id="fut-search" 
-               placeholder="輸入代號或名稱（TXF、台積、2330...）" autocomplete="off">
+               placeholder="輸入期貨代號、股票代號或名稱..." autocomplete="off">
       </div>
 
       <!-- 商品資訊（自動帶入） -->

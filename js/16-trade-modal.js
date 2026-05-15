@@ -31,41 +31,65 @@ const TradeModal = {
   // ============================================================
   // 🔍 智慧搜尋（從 StockDB 模糊比對代號或名稱）
   // ============================================================
-  searchStocks(keyword, limit = 8) {
-    if (!keyword || typeof StockDB === 'undefined' || !StockDB.stocks) return [];
+searchStocks(keyword, limit = 8) {
+  if (!keyword || typeof StockDB === 'undefined' || !StockDB.stocks) return [];
 
-    const kw = String(keyword).trim().toUpperCase();
-    if (!kw) return [];
+  const kw = String(keyword).trim().toUpperCase();
+  if (!kw) return [];
 
-    const all = StockDB.stocks;
-    const exact = [];      // 代號完全相符（最優先）
-    const startsCode = []; // 代號開頭符合
-    const startsName = []; // 名稱開頭符合
-    const includes = [];   // 名稱或代號包含
+  // 🔧 統一把 StockDB.stocks 轉成 [{symbol, name}, ...] 陣列
+  const allStocks = [];
+  const raw = StockDB.stocks;
 
-    for (const code in all) {
-      const item = all[code];
-      const symbolUpper = code.toUpperCase();
-      const name = item.name || '';
-      const nameUpper = name.toUpperCase();
+  if (Array.isArray(raw)) {
+    // 結構 A: 陣列
+    for (const item of raw) {
+      if (!item) continue;
+      const symbol = String(item.symbol || item.code || item.id || '').trim();
+      const name = String(item.name || '').trim();
+      if (symbol) allStocks.push({ symbol, name });
+    }
+  } else if (typeof raw === 'object') {
+    // 結構 B/C: 物件
+    for (const key in raw) {
+      const item = raw[key];
+      if (!item) continue;
+      
+      // 優先用 item 內的 symbol/code 欄位，沒有才用 key
+      let symbol = String(item.symbol || item.code || item.id || '').trim();
+      if (!symbol) symbol = String(key).trim();
+      
+      const name = String(item.name || '').trim();
+      if (symbol) allStocks.push({ symbol, name });
+    }
+  }
 
-      if (symbolUpper === kw) {
-        exact.push({ symbol: code, name });
-      } else if (symbolUpper.startsWith(kw)) {
-        startsCode.push({ symbol: code, name });
-      } else if (nameUpper.startsWith(kw) || name.startsWith(kw)) {
-        startsName.push({ symbol: code, name });
-      } else if (symbolUpper.includes(kw) || nameUpper.includes(kw) || name.includes(kw)) {
-        includes.push({ symbol: code, name });
-      }
+  // 🔍 模糊比對
+  const exact = [];
+  const startsCode = [];
+  const startsName = [];
+  const includes = [];
 
-      // 提早結束（效能優化）
-      if (exact.length + startsCode.length + startsName.length + includes.length >= limit * 3) break;
+  for (const item of allStocks) {
+    const symbolUpper = item.symbol.toUpperCase();
+    const name = item.name;
+    const nameUpper = name.toUpperCase();
+
+    if (symbolUpper === kw) {
+      exact.push(item);
+    } else if (symbolUpper.startsWith(kw)) {
+      startsCode.push(item);
+    } else if (nameUpper.startsWith(kw) || name.startsWith(kw)) {
+      startsName.push(item);
+    } else if (symbolUpper.includes(kw) || nameUpper.includes(kw) || name.includes(kw)) {
+      includes.push(item);
     }
 
-    // 合併、依優先序、限制數量
-    return [...exact, ...startsCode, ...startsName, ...includes].slice(0, limit);
-  },
+    if (exact.length + startsCode.length + startsName.length + includes.length >= limit * 3) break;
+  }
+
+  return [...exact, ...startsCode, ...startsName, ...includes].slice(0, limit);
+},
 
   // ============================================================
   // ⚡ 抓即時報價（用 PriceFetcher）

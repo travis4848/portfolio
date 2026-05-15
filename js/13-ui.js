@@ -1135,124 +1135,26 @@ openMarginSellModal(id) {
   },
 
   // ============================================================
-  // 買入 / 賣出 Modal
+  // 買入 / 賣出 Modal（改用 TradeModal v2）
   // ============================================================
-  openBuyModal()  { this._tradeModal('buy');  },
-  openSellModal() { this._tradeModal('sell'); },
-
-  _tradeModal(type) {
-    const isBuy = type === 'buy';
-    const html = `
-      <div class="modal-mask" id="tradeModal">
-        <div class="modal">
-          <div class="modal-header">
-            <div class="modal-title">${isBuy ? '🛒 買入' : '💰 賣出'}</div>
-            <button class="modal-close" onclick="document.getElementById('tradeModal').remove()">✕</button>
-          </div>
-          <div class="modal-body">
-            <div class="form-group">
-              <label class="form-label">股票代號</label>
-              <input class="form-input" id="m_ticker" placeholder="例如：2330">
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">股數</label>
-                <input class="form-input" type="number" id="m_shares" placeholder="1000">
-              </div>
-              <div class="form-group">
-                <label class="form-label">價格</label>
-                <input class="form-input" type="number" step="0.01" id="m_price" placeholder="580">
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">手續費</label>
-                <input class="form-input" type="number" id="m_fee" value="0">
-              </div>
-              <div class="form-group">
-                <label class="form-label">交易稅（賣出）</label>
-                <input class="form-input" type="number" id="m_tax" value="0" ${isBuy ? 'disabled' : ''}>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">日期</label>
-                <input class="form-input" type="date" id="m_date" value="${new Date().toISOString().slice(0,10)}">
-              </div>
-              <div class="form-group">
-                <label class="form-label">市場</label>
-                <select class="form-input" id="m_market">
-                  <option value="TW">台股</option>
-                  <option value="US">美股</option>
-                  <option value="HK">港股</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">備註</label>
-              <input class="form-input" id="m_note" placeholder="可選">
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button class="btn btn-secondary" onclick="document.getElementById('tradeModal').remove()">取消</button>
-            <button class="btn ${isBuy ? 'btn-success' : 'btn-danger'}" 
-                    onclick="UI._submitTradeModal('${type}')">
-              ${isBuy ? '✅ 確認買入' : '✅ 確認賣出'}
-            </button>
-          </div>
-        </div>
-      </div>`;
-    document.body.insertAdjacentHTML('beforeend', html);
-  },
-
-  _submitTradeModal(type) {
-    const $v = id => document.getElementById(id).value.trim();
-    const symbol = $v('m_ticker').toUpperCase();
-    const shares = parseFloat($v('m_shares'));
-    const price  = parseFloat($v('m_price'));
-    const fee    = parseFloat($v('m_fee')) || 0;
-    const tax    = parseFloat($v('m_tax')) || 0;
-    const date   = $v('m_date');
-    const note   = $v('m_note');
-    const market = $v('m_market') || 'TW';
-
-    if (!symbol || !shares || !price) {
-      this.toast('❌ 請填寫必填欄位', 'error');
+  openBuyModal() {
+    if (typeof TradeModal === 'undefined') {
+      this.toast('❌ TradeModal 未載入', 'error');
       return;
     }
-
-    document.getElementById('tradeModal').remove();
-
-    // 嘗試從 StockDB 找名字
-    let name = symbol;
-    if (typeof StockDB !== 'undefined' && StockDB.getStock) {
-      const s = StockDB.getStock(symbol);
-      if (s && s.name) name = s.name;
-    }
-
-    try {
-      if (type === 'buy') {
-        const total = shares * price + fee;
-        const effectiveCost = price + fee / shares;
-        Store.dispatch({
-          type: 'STOCK_BUY',
-          payload: { symbol, name, market, shares, price, fee, tax: 0, total, 
-                     effectiveCost, date, note }
-        });
-        this.toast(`✅ 買入 ${symbol} ${shares} 股`, 'success');
-      } else {
-        const total = shares * price - fee - tax;
-        Store.dispatch({
-          type: 'STOCK_SELL',
-          payload: { symbol, name, shares, price, fee, tax, total, date, note }
-        });
-        this.toast(`✅ 賣出 ${symbol} ${shares} 股`, 'success');
-      }
-    } catch (e) {
-      this.toast('❌ ' + e.message, 'error');
-      console.error(e);
-    }
+    TradeModal.openStockBuyModal();
   },
+
+  openSellModal() {
+    if (typeof TradeModal === 'undefined') {
+      this.toast('❌ TradeModal 未載入', 'error');
+      return;
+    }
+    TradeModal.openStockSellModal();
+  },
+
+
+
 
   // ============================================================
   // 拍快照

@@ -906,6 +906,614 @@ const TradeModal = {
   },
 
   // ============================================================
+  // 📈 開啟「現股買進」Modal
+  // ============================================================
+  openStockBuyModal({ defaultSymbol = '' } = {}) {
+    const today = new Date().toISOString().slice(0, 10);
+
+    const bodyHtml = `
+      <div class="form-group">
+        <label class="form-label">股票代號 / 名稱 <span style="color:#ef4444;">*</span>
+          <span class="muted" style="font-size:11px; font-weight:normal;">（輸入代號或名稱，例：2330 或 台積）</span>
+        </label>
+        <input class="form-input" type="text" id="stb-search"
+               placeholder="輸入代號或公司名稱..." autocomplete="off">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">股票代號</label>
+          <input class="form-input" type="text" id="stb-symbol" placeholder="自動帶入"
+                 style="text-transform:uppercase;" value="${defaultSymbol}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">股票名稱</label>
+          <input class="form-input" type="text" id="stb-name" placeholder="自動帶入">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">股數 <span style="color:#ef4444;">*</span></label>
+          <input class="form-input" type="number" id="stb-shares" placeholder="1000" min="0" step="1000">
+        </div>
+        <div class="form-group">
+          <label class="form-label">價格 <span style="color:#ef4444;">*</span></label>
+          <div style="display:flex; gap:4px;">
+            <input class="form-input" type="number" id="stb-price" placeholder="0.00" min="0" step="0.01" style="flex:1;">
+            <button type="button" id="stb-fetch-price" class="btn btn-warning"
+                    style="padding:0 10px; white-space:nowrap;" title="抓取即時報價">⚡</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">日期</label>
+          <input class="form-input" type="date" id="stb-date" value="${today}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">市場</label>
+          <select class="form-input" id="stb-market">
+            <option value="TW">台股</option>
+            <option value="US">美股</option>
+            <option value="HK">港股</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">
+          手續費
+          <label style="font-weight:normal; font-size:12px; margin-left:8px; cursor:pointer;">
+            <input type="checkbox" id="stb-fee-manual" style="vertical-align:middle;"> 手動覆蓋
+          </label>
+        </label>
+        <input class="form-input" type="number" id="stb-fee" placeholder="自動計算" min="0" step="1" disabled>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">備註</label>
+        <input class="form-input" type="text" id="stb-note" placeholder="（選填）">
+      </div>
+
+      <div id="stb-preview" style="background:rgba(34,197,94,0.08); border:1px solid rgba(34,197,94,0.3); border-radius:8px; padding:12px; margin-top:8px;">
+        <div style="font-weight:600; color:#86efac; margin-bottom:8px;">💡 試算</div>
+        <div id="stb-preview-content" style="font-size:13px; line-height:1.8;">
+          <span class="muted">請輸入股數與價格...</span>
+        </div>
+      </div>
+    `;
+
+    const footerHtml = `
+      <button class="btn btn-secondary" data-close>取消</button>
+      <button class="btn btn-success" id="stb-submit">✅ 確認買入</button>
+    `;
+
+    const modal = this._buildModal('stock-buy-modal', '🛒 現股買進', bodyHtml, footerHtml);
+
+    const $ = sel => modal.querySelector(sel);
+    const $search = $('#stb-search');
+    const $symbol = $('#stb-symbol');
+    const $name = $('#stb-name');
+    const $shares = $('#stb-shares');
+    const $price = $('#stb-price');
+    const $date = $('#stb-date');
+    const $market = $('#stb-market');
+    const $feeManual = $('#stb-fee-manual');
+    const $fee = $('#stb-fee');
+    const $note = $('#stb-note');
+    const $fetchPrice = $('#stb-fetch-price');
+    const $previewContent = $('#stb-preview-content');
+    const $submit = $('#stb-submit');
+
+    // ---------- 試算 ----------
+    const updatePreview = () => {
+      const shares = Number($shares.value) || 0;
+      const price = Number($price.value) || 0;
+
+      if (shares <= 0 || price <= 0) {
+        $previewContent.innerHTML = '<span class="muted">請輸入股數與價格...</span>';
+        return;
+      }
+
+      const subtotal = shares * price;
+      const settings = (Store.getSettings && Store.getSettings()) || {};
+      const discount = settings.brokerFeeDiscount ?? CONFIG?.FEE?.BROKER_FEE_DISCOUNT ?? 0.28;
+      const feeRate = CONFIG?.FEE?.BROKER_FEE_RATE ?? 0.001425;
+      const minFee = CONFIG?.FEE?.MIN_FEE ?? 20;
+      const autoFee = Math.max(minFee, Math.round(subtotal * feeRate * discount));
+      const fee = $feeManual.checked ? (Number($fee.value) || 0) : autoFee;
+      if (!$feeManual.checked) $fee.value = autoFee;
+
+      const total = subtotal + fee;
+      const effectiveCost = total / shares;
+
+      $previewContent.innerHTML = `
+        <div>📊 成交金額：<strong>${this._fmt(subtotal)}</strong></div>
+        <div>🧾 手續費：<strong>${this._fmt(fee)}</strong> <span class="muted">(${(discount * 10).toFixed(1)} 折)</span></div>
+        <div>💵 應付總額：<strong class="up">${this._fmt(total)}</strong></div>
+        <div>📈 實際成本：<strong>${effectiveCost.toFixed(2)} 元/股</strong></div>
+      `;
+    };
+
+    // ---------- 自動完成 ----------
+    const cleanupAC = this._attachAutocomplete($search, (item) => {
+      $symbol.value = item.symbol;
+      $name.value = item.name;
+      $search.value = `${item.symbol}  ${item.name}`;
+      setTimeout(() => $shares.focus(), 50);
+    });
+    modal._addCleanup(cleanupAC);
+
+    if (defaultSymbol && typeof StockDB !== 'undefined' && StockDB.getStock) {
+      const found = StockDB.getStock(defaultSymbol);
+      if (found && found.name) {
+        $name.value = found.name;
+        $search.value = `${defaultSymbol}  ${found.name}`;
+      }
+    }
+
+    // ---------- 事件 ----------
+    [$shares, $price, $fee].forEach(el => {
+      el.addEventListener('input', updatePreview);
+    });
+
+    $feeManual.addEventListener('change', () => {
+      $fee.disabled = !$feeManual.checked;
+      if (!$feeManual.checked) updatePreview();
+      else $fee.focus();
+    });
+
+    $fetchPrice.addEventListener('click', async () => {
+      const sym = ($symbol.value || '').trim().toUpperCase();
+      if (!sym) {
+        this._toast('請先選擇股票', 'warning');
+        return;
+      }
+      $fetchPrice.disabled = true;
+      $fetchPrice.textContent = '⏳';
+      try {
+        const p = await this.fetchStockPrice(sym);
+        if (p != null) {
+          $price.value = p;
+          updatePreview();
+          this._toast(`✅ 已帶入即時價：${p}`, 'success');
+        } else {
+          this._toast('抓取報價失敗', 'warning');
+        }
+      } catch (err) {
+        this._toast('查詢失敗：' + err.message, 'error');
+      } finally {
+        $fetchPrice.disabled = false;
+        $fetchPrice.textContent = '⚡';
+      }
+    });
+
+    // ---------- 提交 ----------
+    $submit.addEventListener('click', () => {
+      const symbol = ($symbol.value || '').trim().toUpperCase();
+      const name = ($name.value || '').trim();
+      const shares = Number($shares.value) || 0;
+      const price = Number($price.value) || 0;
+      const date = $date.value;
+      const market = $market.value || 'TW';
+      const fee = Number($fee.value) || 0;
+      const note = $note.value.trim();
+
+      if (!symbol) { this._toast('請選擇股票', 'error'); $search.focus(); return; }
+      if (shares <= 0) { this._toast('股數必須大於 0', 'error'); $shares.focus(); return; }
+      if (price <= 0) { this._toast('價格必須大於 0', 'error'); $price.focus(); return; }
+      if (!date) { this._toast('請選擇日期', 'error'); return; }
+
+      $submit.disabled = true;
+      $submit.textContent = '處理中...';
+
+      try {
+        const total = shares * price + fee;
+        const effectiveCost = (shares * price + fee) / shares;
+
+        Store.dispatch({
+          type: 'STOCK_BUY',
+          payload: {
+            symbol, name: name || symbol, market,
+            shares, price, fee, tax: 0, total,
+            effectiveCost, date, note
+          }
+        });
+
+        this._toast(`✅ 買入 ${symbol} ${this._fmt(shares)} 股 @ ${price}`, 'success');
+        modal._close();
+
+        if (typeof UI !== 'undefined' && typeof UI.renderHoldings === 'function') {
+          UI.renderHoldings();
+        }
+      } catch (err) {
+        console.error('[TradeModal] STOCK_BUY 失敗:', err);
+        this._toast('買入失敗：' + err.message, 'error');
+        $submit.disabled = false;
+        $submit.textContent = '✅ 確認買入';
+      }
+    });
+
+    updatePreview();
+    setTimeout(() => $search.focus(), 100);
+  },
+
+  // ============================================================
+  // 💰 開啟「現股賣出」Modal（含 FIFO 試算）
+  // ============================================================
+  openStockSellModal({ defaultSymbol = '' } = {}) {
+    const today = new Date().toISOString().slice(0, 10);
+    const stocks = (Store.getStocks && Store.getStocks()) || [];
+
+    // 篩選有持股的
+    const activeStocks = stocks.filter(s => {
+      const total = (s.lots || []).reduce((sum, l) => sum + (l.remaining ?? l.shares ?? 0), 0);
+      return total > 0;
+    });
+
+    if (activeStocks.length === 0) {
+      this._toast('⚠️ 目前沒有可賣出的持股', 'warning');
+      return;
+    }
+
+    const bodyHtml = `
+      <div class="form-group">
+        <label class="form-label">選擇持股 <span style="color:#ef4444;">*</span></label>
+        <select class="form-input" id="sts-select" style="cursor:pointer;">
+          <option value="">-- 請選擇 --</option>
+          ${activeStocks.map(s => {
+            const total = (s.lots || []).reduce((sum, l) => sum + (l.remaining ?? l.shares ?? 0), 0);
+            return `<option value="${s.symbol}" ${defaultSymbol === s.symbol ? 'selected' : ''}>
+              ${s.symbol} ${s.name || ''} (持有 ${this._fmt(total)} 股)
+            </option>`;
+          }).join('')}
+        </select>
+      </div>
+
+      <!-- 持股摘要（選擇後顯示） -->
+      <div id="sts-summary" style="display:none; background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.3); border-radius:8px; padding:12px; margin-bottom:12px;">
+        <div id="sts-summary-content" style="font-size:13px; line-height:1.7;"></div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">賣出股數 <span style="color:#ef4444;">*</span>
+            <button type="button" id="sts-all" class="btn btn-secondary"
+                    style="padding:2px 8px; font-size:11px; margin-left:6px;">全部</button>
+          </label>
+          <input class="form-input" type="number" id="sts-shares" placeholder="0" min="1" step="1000">
+        </div>
+        <div class="form-group">
+          <label class="form-label">賣出價格 <span style="color:#ef4444;">*</span></label>
+          <div style="display:flex; gap:4px;">
+            <input class="form-input" type="number" id="sts-price" placeholder="0.00" min="0" step="0.01" style="flex:1;">
+            <button type="button" id="sts-fetch-price" class="btn btn-warning"
+                    style="padding:0 10px;" title="抓取即時報價">⚡</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">日期</label>
+          <input class="form-input" type="date" id="sts-date" value="${today}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">
+            手續費
+            <label style="font-weight:normal; font-size:12px; margin-left:8px; cursor:pointer;">
+              <input type="checkbox" id="sts-fee-manual" style="vertical-align:middle;"> 手動
+            </label>
+          </label>
+          <input class="form-input" type="number" id="sts-fee" placeholder="自動" min="0" step="1" disabled>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">
+          交易稅
+          <label style="font-weight:normal; font-size:12px; margin-left:8px; cursor:pointer;">
+            <input type="checkbox" id="sts-tax-manual" style="vertical-align:middle;"> 手動覆蓋
+          </label>
+          <span class="muted" style="font-size:11px; font-weight:normal; margin-left:6px;">（自動 0.3%）</span>
+        </label>
+        <input class="form-input" type="number" id="sts-tax" placeholder="自動" min="0" step="1" disabled>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">備註</label>
+        <input class="form-input" type="text" id="sts-note" placeholder="（選填）">
+      </div>
+
+      <div id="sts-preview" style="background:rgba(239,68,68,0.06); border:1px solid rgba(239,68,68,0.3); border-radius:8px; padding:12px; margin-top:8px;">
+        <div style="font-weight:600; color:#fca5a5; margin-bottom:8px;">💡 FIFO 試算</div>
+        <div id="sts-preview-content" style="font-size:13px; line-height:1.7;">
+          <span class="muted">請選擇持股...</span>
+        </div>
+      </div>
+    `;
+
+    const footerHtml = `
+      <button class="btn btn-secondary" data-close>取消</button>
+      <button class="btn btn-danger" id="sts-submit">💰 確認賣出</button>
+    `;
+
+    const modal = this._buildModal('stock-sell-modal', '💰 現股賣出', bodyHtml, footerHtml);
+
+    const $ = sel => modal.querySelector(sel);
+    const $select = $('#sts-select');
+    const $summary = $('#sts-summary');
+    const $summaryContent = $('#sts-summary-content');
+    const $shares = $('#sts-shares');
+    const $price = $('#sts-price');
+    const $date = $('#sts-date');
+    const $allBtn = $('#sts-all');
+    const $feeManual = $('#sts-fee-manual');
+    const $fee = $('#sts-fee');
+    const $taxManual = $('#sts-tax-manual');
+    const $tax = $('#sts-tax');
+    const $note = $('#sts-note');
+    const $fetchPrice = $('#sts-fetch-price');
+    const $previewContent = $('#sts-preview-content');
+    const $submit = $('#sts-submit');
+
+    let currentStock = null;
+    let totalShares = 0;
+    let totalCost = 0;
+    let avgCost = 0;
+    let activeLots = [];
+
+    // ---------- 選擇持股 ----------
+    const onSelectStock = () => {
+      const sym = $select.value;
+      if (!sym) {
+        currentStock = null;
+        $summary.style.display = 'none';
+        $shares.max = '';
+        updatePreview();
+        return;
+      }
+      currentStock = stocks.find(s => s.symbol === sym);
+      if (!currentStock) return;
+
+      activeLots = (currentStock.lots || []).filter(l => (l.remaining ?? l.shares ?? 0) > 0);
+      totalShares = 0;
+      totalCost = 0;
+      activeLots.forEach(l => {
+        const sh = l.remaining ?? l.shares ?? 0;
+        const ec = l.effectiveCost ?? l.price ?? 0;
+        totalShares += sh;
+        totalCost += sh * ec;
+      });
+      avgCost = totalShares > 0 ? totalCost / totalShares : 0;
+
+      const curPrice = currentStock.currentPrice || avgCost;
+      const value = totalShares * curPrice;
+      const pl = value - totalCost;
+      const plPct = totalCost > 0 ? (pl / totalCost) * 100 : 0;
+
+      $summaryContent.innerHTML = `
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px 12px;">
+          <div>持有股數：<strong>${this._fmt(totalShares)}</strong></div>
+          <div>均價：<strong>${avgCost.toFixed(2)}</strong></div>
+          <div>現價：<strong>${curPrice.toFixed(2)}</strong></div>
+          <div>市值：<strong>${this._fmt(value)}</strong></div>
+          <div style="grid-column:1/-1;">
+            未實現損益：
+            <strong class="${pl >= 0 ? 'up' : 'down'}">
+              ${pl >= 0 ? '+' : ''}${this._fmt(pl)}
+              (${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%)
+            </strong>
+          </div>
+        </div>
+      `;
+      $summary.style.display = 'block';
+      $shares.max = totalShares;
+      $price.value = curPrice.toFixed(2);
+      updatePreview();
+    };
+
+    // ---------- 試算（FIFO） ----------
+    const updatePreview = () => {
+      if (!currentStock) {
+        $previewContent.innerHTML = '<span class="muted">請選擇持股...</span>';
+        return;
+      }
+
+      const sellShares = Number($shares.value) || 0;
+      const sellPrice = Number($price.value) || 0;
+
+      if (sellShares <= 0 || sellPrice <= 0) {
+        $previewContent.innerHTML = '<span class="muted">請輸入賣出股數與價格...</span>';
+        return;
+      }
+
+      if (sellShares > totalShares) {
+        $previewContent.innerHTML = `<span class="down">❌ 賣出股數超過持有股數（${this._fmt(totalShares)}）</span>`;
+        return;
+      }
+
+      const subtotal = sellShares * sellPrice;
+
+      // 自動費用
+      const settings = (Store.getSettings && Store.getSettings()) || {};
+      const discount = settings.brokerFeeDiscount ?? CONFIG?.FEE?.BROKER_FEE_DISCOUNT ?? 0.28;
+      const feeRate = CONFIG?.FEE?.BROKER_FEE_RATE ?? 0.001425;
+      const minFee = CONFIG?.FEE?.MIN_FEE ?? 20;
+      const taxRate = CONFIG?.FEE?.TAX_RATE_STOCK ?? 0.003;
+
+      const autoFee = Math.max(minFee, Math.round(subtotal * feeRate * discount));
+      const autoTax = Math.round(subtotal * taxRate);
+
+      const fee = $feeManual.checked ? (Number($fee.value) || 0) : autoFee;
+      const tax = $taxManual.checked ? (Number($tax.value) || 0) : autoTax;
+      if (!$feeManual.checked) $fee.value = autoFee;
+      if (!$taxManual.checked) $tax.value = autoTax;
+
+      // FIFO 模擬
+      let remainingToSell = sellShares;
+      const closedLots = [];
+      let totalLotCost = 0;
+
+      for (const lot of activeLots) {
+        if (remainingToSell <= 0) break;
+        const lotRemain = lot.remaining ?? lot.shares ?? 0;
+        if (lotRemain <= 0) continue;
+
+        const sellFromThis = Math.min(remainingToSell, lotRemain);
+        const lotEC = lot.effectiveCost ?? lot.price ?? 0;
+        totalLotCost += sellFromThis * lotEC;
+
+        closedLots.push({
+          date: lot.date,
+          shares: sellFromThis,
+          price: lot.price,
+          effectiveCost: lotEC
+        });
+
+        remainingToSell -= sellFromThis;
+      }
+
+      const realizedPL = subtotal - totalLotCost - fee - tax;
+      const realizedPLPct = totalLotCost > 0 ? (realizedPL / totalLotCost) * 100 : 0;
+      const netCashIn = subtotal - fee - tax;
+
+      const lotsHtml = closedLots.map(l => `
+        <div style="margin-left:8px;">
+          • ${l.date || '?'}
+          <strong>${this._fmt(l.shares)}</strong> 股
+          @ <strong>${l.price.toFixed(2)}</strong>
+          <span class="muted">(成本 ${l.effectiveCost.toFixed(2)})</span>
+        </div>
+      `).join('');
+
+      $previewContent.innerHTML = `
+        <div style="margin-bottom:6px;">將從以下批次賣出（FIFO）：</div>
+        ${lotsHtml}
+        <hr style="border-color:rgba(255,255,255,0.1); margin:8px 0;">
+        <div>📊 成交金額：<strong>${this._fmt(subtotal)}</strong></div>
+        <div>💰 結清成本：<strong>${this._fmt(totalLotCost)}</strong></div>
+        <div>🧾 手續費：<strong>${this._fmt(fee)}</strong> <span class="muted">(${(discount * 10).toFixed(1)} 折)</span></div>
+        <div>💸 交易稅：<strong>${this._fmt(tax)}</strong> <span class="muted">(${(taxRate * 100).toFixed(1)}%)</span></div>
+        <div>💵 預估進帳：<strong class="up">${this._fmt(netCashIn)}</strong></div>
+        <hr style="border-color:rgba(255,255,255,0.1); margin:8px 0;">
+        <div style="font-size:14px;">
+          🎯 已實現損益：
+          <strong class="${realizedPL >= 0 ? 'up' : 'down'}">
+            ${realizedPL >= 0 ? '+' : ''}${this._fmt(realizedPL)}
+            (${realizedPLPct >= 0 ? '+' : ''}${realizedPLPct.toFixed(2)}%)
+          </strong>
+        </div>
+      `;
+    };
+
+    // ---------- 事件 ----------
+    $select.addEventListener('change', onSelectStock);
+    [$shares, $price, $fee, $tax].forEach(el => {
+      el.addEventListener('input', updatePreview);
+    });
+    $allBtn.addEventListener('click', () => {
+      if (totalShares > 0) {
+        $shares.value = totalShares;
+        updatePreview();
+      }
+    });
+    $feeManual.addEventListener('change', () => {
+      $fee.disabled = !$feeManual.checked;
+      if (!$feeManual.checked) updatePreview();
+      else $fee.focus();
+    });
+    $taxManual.addEventListener('change', () => {
+      $tax.disabled = !$taxManual.checked;
+      if (!$taxManual.checked) updatePreview();
+      else $tax.focus();
+    });
+
+    $fetchPrice.addEventListener('click', async () => {
+      if (!currentStock) {
+        this._toast('請先選擇持股', 'warning');
+        return;
+      }
+      $fetchPrice.disabled = true;
+      $fetchPrice.textContent = '⏳';
+      try {
+        const p = await this.fetchStockPrice(currentStock.symbol);
+        if (p != null) {
+          $price.value = p;
+          updatePreview();
+          this._toast(`✅ 已帶入即時價：${p}`, 'success');
+        } else {
+          this._toast('抓取報價失敗', 'warning');
+        }
+      } catch (err) {
+        this._toast('查詢失敗：' + err.message, 'error');
+      } finally {
+        $fetchPrice.disabled = false;
+        $fetchPrice.textContent = '⚡';
+      }
+    });
+
+    // ---------- 提交 ----------
+    $submit.addEventListener('click', () => {
+      if (!currentStock) { this._toast('請選擇持股', 'error'); $select.focus(); return; }
+
+      const sellShares = Number($shares.value) || 0;
+      const sellPrice = Number($price.value) || 0;
+      const date = $date.value;
+      const fee = Number($fee.value) || 0;
+      const tax = Number($tax.value) || 0;
+      const note = $note.value.trim();
+
+      if (sellShares <= 0) { this._toast('賣出股數必須大於 0', 'error'); $shares.focus(); return; }
+      if (sellShares > totalShares) { this._toast('賣出股數超過持有', 'error'); $shares.focus(); return; }
+      if (sellPrice <= 0) { this._toast('價格必須大於 0', 'error'); $price.focus(); return; }
+      if (!date) { this._toast('請選擇日期', 'error'); return; }
+
+      $submit.disabled = true;
+      $submit.textContent = '處理中...';
+
+      try {
+        const total = sellShares * sellPrice - fee - tax;
+
+        Store.dispatch({
+          type: 'STOCK_SELL',
+          payload: {
+            symbol: currentStock.symbol,
+            name: currentStock.name || currentStock.symbol,
+            shares: sellShares,
+            price: sellPrice,
+            fee, tax, total,
+            date, note
+          }
+        });
+
+        this._toast(`✅ 賣出 ${currentStock.symbol} ${this._fmt(sellShares)} 股 @ ${sellPrice}`, 'success');
+        modal._close();
+
+        if (typeof UI !== 'undefined' && typeof UI.renderHoldings === 'function') {
+          UI.renderHoldings();
+        }
+      } catch (err) {
+        console.error('[TradeModal] STOCK_SELL 失敗:', err);
+        this._toast('賣出失敗：' + err.message, 'error');
+        $submit.disabled = false;
+        $submit.textContent = '💰 確認賣出';
+      }
+    });
+
+    // 預設選中
+    if (defaultSymbol) {
+      $select.value = defaultSymbol;
+      onSelectStock();
+    }
+
+    setTimeout(() => $select.focus(), 100);
+  },
+
+
+  // ============================================================
   // 🎯 開啟「期貨開倉」Modal（含智慧搜尋）
   // ============================================================
   openFuturesOpenModal({ defaultSymbol = '', defaultDirection = 'long' } = {}) {

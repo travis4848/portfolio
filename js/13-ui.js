@@ -739,14 +739,65 @@ openMarginSellModal(id) {
   TradeModal.openMarginCloseModal(id);
 },
 
+  // ============================================================
+  // 📈 期貨開倉 Modal
+  // ============================================================
   openFuturesOpenModal() {
-    this.toast('🚧 期貨開倉 Modal 將在 Phase D3 實作', 'warning');
-    console.log('💡 目前可用 Console 測試：Store.dispatch({type:"FUTURES_OPEN", payload:{...}})');
+    if (typeof TradeModal === 'undefined') {
+      this.toast('❌ TradeModal 未載入', 'error');
+      return;
+    }
+    TradeModal.openFuturesOpenModal({ defaultDirection: 'long' });
   },
+
+  // ============================================================
+  // 📈 期貨平倉 Modal
+  // ============================================================
   openFuturesCloseModal(id) {
-    this.toast('🚧 期貨平倉 Modal 將在 Phase D3 實作', 'warning');
-    if (id) console.log('要平倉的 id:', id);
+    if (typeof TradeModal === 'undefined') {
+      this.toast('❌ TradeModal 未載入', 'error');
+      return;
+    }
+
+    // 沒指定 id：顯示部位選擇器
+    if (!id) {
+      const list = Store.getFutures() || [];
+      // 兼容兩種欄位命名
+      const active = list.filter(p => (p.lots || p.totalContracts || 0) > 0);
+
+      if (active.length === 0) {
+        this.toast('⚠️ 目前無可平倉的期貨部位', 'warning');
+        return;
+      }
+
+      if (active.length === 1) {
+        TradeModal.openFuturesCloseModal({ positionId: active[0].id });
+        return;
+      }
+
+      let msg = '請輸入要平倉的部位編號：\n\n';
+      active.forEach((p, i) => {
+        const sym = p.symbol || p.product || '?';
+        const name = p.name || '';
+        const lots = p.lots || p.totalContracts || 0;
+        const dir = (p.type || p.direction) === 'long' ? '多單' : '空單';
+        msg += `${i + 1}. ${sym} ${name} [${dir}] ${lots} 口\n`;
+      });
+      const idx = prompt(msg, '1');
+      if (idx === null) return;
+      const n = parseInt(idx);
+      if (isNaN(n) || n < 1 || n > active.length) {
+        this.toast('❌ 編號無效', 'error');
+        return;
+      }
+      TradeModal.openFuturesCloseModal({ positionId: active[n - 1].id });
+      return;
+    }
+
+    // 指定 id：從表格 💰 按鈕來
+    TradeModal.openFuturesCloseModal({ positionId: id });
   },
+
   openManualFuturesPriceModal(posId) {
     const pos = Store.getFutures().find(f => f.id === posId);
     if (!pos) return;

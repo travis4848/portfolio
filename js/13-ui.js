@@ -18,7 +18,6 @@ const UI = {
     this._bindTabs();
     this._bindActions();
 
-    // 訂閱 Store 變化
     if (typeof Store !== 'undefined' && Store.subscribe) {
       Store.subscribe(() => {
         this.renderCurrent();
@@ -28,7 +27,6 @@ const UI = {
 
     this.renderAll();
 
-    // 每 30 秒重繪一次（讓「3 秒前」相對時間更新）
     setInterval(() => {
       if (this.currentTab === 'holdings') this.renderHoldings();
     }, 30000);
@@ -62,17 +60,14 @@ const UI = {
     $('btnSnapshot')?.addEventListener('click', () => this.takeSnapshot());
     $('btnUpdatePrice')?.addEventListener('click', () => this.refreshAllPrices());
 
-    // ⭐ 新增：融資券
     $('btnMarginBuy')?.addEventListener('click', () => this.openMarginBuyModal());
     $('btnMarginSell')?.addEventListener('click', () => this.openMarginSellModal());
     $('btnUpdatePriceMargin')?.addEventListener('click', () => this.refreshAllPrices());
 
-    // ⭐ 新增：期貨
     $('btnFuturesOpen')?.addEventListener('click', () => this.openFuturesOpenModal());
     $('btnFuturesClose')?.addEventListener('click', () => this.openFuturesCloseModal());
     $('btnUpdatePriceFutures')?.addEventListener('click', () => this.refreshAllPrices());
   },
-
 
   // ============================================================
   // 渲染分發
@@ -86,8 +81,8 @@ const UI = {
     try {
       switch (this.currentTab) {
         case 'holdings': this.renderHoldings(); break;
-        case 'margin':   this.renderMargin();   break;   // ⭐ 新增
-        case 'futures':  this.renderFutures();  break;   // ⭐ 新增
+        case 'margin':   this.renderMargin();   break;
+        case 'futures':  this.renderFutures();  break;
         case 'trades':   this.renderTrades();   break;
         case 'stats':    this.renderStats();    break;
         case 'settings': this.renderSettings(); break;
@@ -96,7 +91,6 @@ const UI = {
       console.error('[UI] 渲染失敗:', e);
     }
   },
-
 
   // ============================================================
   // 同步狀態徽章
@@ -126,13 +120,12 @@ const UI = {
   },
 
   // ============================================================
-  // 持股 Tab
+  // 持股 Tab ✅ 修正：移除錯誤的期貨槓桿卡
   // ============================================================
   renderHoldings() {
     const portfolio = Store.getPortfolio();
     if (!portfolio) return;
 
-    // ----- 統計卡片 -----
     const stocks = Store.getStocks();
     const stats = this._calcStockStats(stocks);
 
@@ -162,21 +155,9 @@ const UI = {
             ${stats.realizedPL >= 0 ? '+' : ''}${this._fmt(stats.realizedPL)}
           </div>
         </div>
-        <div class="stat-card">
-          <div class="stat-label">⚖️ 平均槓桿</div>
-          <div class="stat-value ${stats.avgLeverage >= 15 ? 'down' : stats.avgLeverage >= 10 ? '' : 'up'}">
-            ${stats.avgLeverage.toFixed(1)} x
-          </div>
-          <div class="stat-sub muted">契約值/保證金</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">📊 契約總值</div>
-          <div class="stat-value">${this._fmt(stats.totalContractValue)}</div>
-        </div>
       `;
     }
 
-    // ----- 持股列表 -----
     const list = document.getElementById('holdingsList');
     if (!list) return;
 
@@ -192,28 +173,26 @@ const UI = {
 
     let rows = '';
     stocks.forEach(s => {
-      const totalShares = (s.lots || []).reduce((sum, l) => sum + (l.remaining ?? l.shares ?? 0), 0);
+      const totalShares = (s.lots || []).reduce(
+        (sum, l) => sum + (Number(l.remaining ?? l.shares) || 0), 0);
       if (totalShares <= 0) return;
 
-      // 加權平均成本（含手續費）
       let totalCost = 0;
       (s.lots || []).forEach(l => {
-        const sh = l.remaining ?? l.shares ?? 0;
-        const ec = l.effectiveCost ?? l.price ?? 0;
+        const sh = Number(l.remaining ?? l.shares) || 0;
+        const ec = Number(l.effectiveCost ?? l.price) || 0;
         totalCost += sh * ec;
       });
       const avgCost = totalShares > 0 ? totalCost / totalShares : 0;
-      const curPrice = s.currentPrice || avgCost;
+      const curPrice = Number(s.currentPrice) || avgCost || 0;
       const value = totalShares * curPrice;
       const pl = value - totalCost;
       const plPct = totalCost > 0 ? (pl / totalCost) * 100 : 0;
 
-      // 報價時間
-      const priceTimeStr = s.lastPriceUpdate 
+      const priceTimeStr = s.lastPriceUpdate
         ? this._timeAgo(s.lastPriceUpdate)
         : '<span class="muted">未更新</span>';
 
-      // 漲跌符號
       const priceClass = pl > 0 ? 'up' : pl < 0 ? 'down' : '';
       const priceArrow = pl > 0 ? '▲' : pl < 0 ? '▼' : '─';
 
@@ -224,9 +203,9 @@ const UI = {
             <span class="ticker-name">${s.name || ''}</span>
           </td>
           <td class="num">${this._fmt(totalShares)}</td>
-          <td class="num">${avgCost.toFixed(2)}</td>
+          <td class="num">${(avgCost || 0).toFixed(2)}</td>
           <td class="num ${priceClass}">
-            ${priceArrow} ${curPrice.toFixed(2)}
+            ${priceArrow} ${(curPrice || 0).toFixed(2)}
             <div class="muted small">${priceTimeStr}</div>
           </td>
           <td class="num">${this._fmt(totalCost)}</td>
@@ -235,21 +214,20 @@ const UI = {
             ${pl >= 0 ? '+' : ''}${this._fmt(pl)}
           </td>
           <td class="num ${plPct >= 0 ? 'up' : 'down'}">
-            ${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%
+            ${plPct >= 0 ? '+' : ''}${(plPct || 0).toFixed(2)}%
           </td>
           <td>
-            <button class="btn btn-warning btn-sm" 
+            <button class="btn btn-warning btn-sm"
                     onclick="UI.refreshOnePrice('${s.symbol}','${s.market || 'TW'}')"
                     title="抓即時報價">🔄</button>
-            <button class="btn btn-secondary btn-sm" 
+            <button class="btn btn-secondary btn-sm"
                     onclick="UI.openManualPriceModal('${s.symbol}')"
                     title="手動輸入">✏️</button>
           </td>
         </tr>`;
     });
 
-    // 末次刷新時間提示
-    const refreshHint = this._lastRefreshTime 
+    const refreshHint = this._lastRefreshTime
       ? `<div class="muted small" style="text-align:right;padding:4px 8px">
            最後抓取：${this._timeAgo(this._lastRefreshTime)}
          </div>`
@@ -282,10 +260,9 @@ const UI = {
       this.toast(`🔄 抓取 ${symbol}...`, 'success');
       const r = await PriceFetcher.fetchOne(symbol, market, { useCache: false });
 
-      // 同步更新現股 & 融資券（同 symbol 兩邊都改）
-      const hasStock  = Store.getStocks().some(s => 
+      const hasStock  = Store.getStocks().some(s =>
         String(s.symbol).toUpperCase() === String(symbol).toUpperCase());
-      const hasMargin = (Store.getMargin() || []).some(p => 
+      const hasMargin = (Store.getMargin() || []).some(p =>
         String(p.symbol).toUpperCase() === String(symbol).toUpperCase());
 
       if (hasStock) {
@@ -306,7 +283,6 @@ const UI = {
       this.toast(`❌ ${symbol}: ${e.message}`, 'error');
     }
   },
-
 
   // ============================================================
   // 即時報價：刷新全部
@@ -359,14 +335,13 @@ const UI = {
     this.toast(`✅ ${symbol} → ${price}`, 'success');
   },
 
-    // ============================================================
+  // ============================================================
   // 💎 融資券 Tab
   // ============================================================
   renderMargin() {
     const list = Store.getMargin() || [];
     const stats = this._calcMarginStats(list);
 
-    // ----- 統計卡片 -----
     const grid = document.getElementById('marginStatGrid');
     if (grid) {
       grid.innerHTML = `
@@ -398,7 +373,7 @@ const UI = {
         <div class="stat-card">
           <div class="stat-label">⚖️ 平均槓桿</div>
           <div class="stat-value ${stats.avgLeverage >= 2.5 ? 'down' : stats.avgLeverage >= 1.8 ? '' : 'up'}">
-            ${stats.avgLeverage.toFixed(2)} x
+            ${(stats.avgLeverage || 0).toFixed(2)} x
           </div>
           <div class="stat-sub muted">市值/自備款</div>
         </div>
@@ -410,8 +385,6 @@ const UI = {
       `;
     }
 
-
-    // ----- 列表 -----
     const wrap = document.getElementById('marginList');
     if (!wrap) return;
 
@@ -428,32 +401,28 @@ const UI = {
     let rows = '';
     list.forEach(pos => {
       const totalShares = (pos.lots || []).reduce(
-        (s, l) => s + (l.remaining ?? l.shares ?? 0), 0);
+        (s, l) => s + (Number(l.remaining ?? l.shares) || 0), 0);
       if (totalShares <= 0) return;
 
-      // 加權平均成本
       let totalCost = 0;
       (pos.lots || []).forEach(l => {
-        const sh = l.remaining ?? l.shares ?? 0;
-        const ec = l.effectiveCost ?? l.price ?? 0;
+        const sh = Number(l.remaining ?? l.shares) || 0;
+        const ec = Number(l.effectiveCost ?? l.price) || 0;
         totalCost += sh * ec;
       });
       const avgCost = totalShares > 0 ? totalCost / totalShares : 0;
-      const curPrice = pos.currentPrice || avgCost;
+      const curPrice = Number(pos.currentPrice) || avgCost || 0;
       const value = totalShares * curPrice;
 
-      // 損益（融資 vs 融券方向相反）
       const pl = pos.type === 'long'
         ? (value - totalCost)
         : (totalCost - value);
       const plPct = totalCost > 0 ? (pl / totalCost) * 100 : 0;
 
-      // 自備款 / 維持率
       const ownFund = pos.type === 'long'
-        ? (totalCost - (pos.loanAmount || 0))   // 自備款
-        : (pos.depositAmount || 0);              // 保證金
+        ? (totalCost - (pos.loanAmount || 0))
+        : (pos.depositAmount || 0);
 
-      // 維持率（簡化版）：(市值 + 保證金) / (融資金額 or 市值)
       let maintainPct = 0;
       if (pos.type === 'long' && pos.loanAmount > 0) {
         maintainPct = (value / pos.loanAmount) * 100;
@@ -461,7 +430,7 @@ const UI = {
         maintainPct = ((pos.depositAmount || 0) + value) / value * 100;
       }
       const maintainClass = maintainPct >= 130 ? 'up' : 'down';
-      // ⭐ 槓桿比例
+
       let leverage = 0;
       if (pos.type === 'long') {
         const ownFundCost = totalCost - (pos.loanAmount || 0);
@@ -487,19 +456,19 @@ const UI = {
           </td>
           <td>${typeLabel}</td>
           <td class="num">${this._fmt(totalShares)}</td>
-          <td class="num">${avgCost.toFixed(2)}</td>
+          <td class="num">${(avgCost || 0).toFixed(2)}</td>
           <td class="num">
-            ${curPrice.toFixed(2)}
+            ${(curPrice || 0).toFixed(2)}
             <div class="muted small">${priceTimeStr}</div>
           </td>
           <td class="num">${this._fmt(value)}</td>
           <td class="num">${this._fmt(ownFund)}</td>
-          <td class="num ${leverageClass}">${leverage.toFixed(2)}x</td>
-          <td class="num ${maintainClass}">${maintainPct.toFixed(0)}%</td>
+          <td class="num ${leverageClass}">${(leverage || 0).toFixed(2)}x</td>
+          <td class="num ${maintainClass}">${(maintainPct || 0).toFixed(0)}%</td>
           <td class="num ${pl >= 0 ? 'up' : 'down'}">
             ${pl >= 0 ? '+' : ''}${this._fmt(pl)}
             <div class="small ${plPct >= 0 ? 'up' : 'down'}">
-              ${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%
+              ${plPct >= 0 ? '+' : ''}${(plPct || 0).toFixed(2)}%
             </div>
           </td>
           <td>
@@ -530,18 +499,18 @@ const UI = {
   _calcMarginStats(list) {
     let longValue = 0, shortValue = 0, totalLoan = 0, totalDeposit = 0;
     let unrealizedPL = 0, totalCost = 0, realizedPL = 0;
-    let totalOwnFund = 0;  // ⭐ 總自備款（含融券保證金）
-    let totalMarketValue = 0;  // ⭐ 總市值（給槓桿算）
+    let totalOwnFund = 0;
+    let totalMarketValue = 0;
 
     list.forEach(pos => {
       let shares = 0, cost = 0;
       (pos.lots || []).forEach(l => {
-        const sh = l.remaining ?? l.shares ?? 0;
-        const ec = l.effectiveCost ?? l.price ?? 0;
+        const sh = Number(l.remaining ?? l.shares) || 0;
+        const ec = Number(l.effectiveCost ?? l.price) || 0;
         shares += sh;
         cost += sh * ec;
       });
-      const value = shares * (pos.currentPrice || 0);
+      const value = shares * (Number(pos.currentPrice) || 0);
       totalCost += cost;
       realizedPL += pos.realizedPnl || 0;
 
@@ -550,40 +519,34 @@ const UI = {
         if (pos.type === 'long') {
           longValue += value;
           totalLoan += pos.loanAmount || 0;
-          totalOwnFund += (cost - (pos.loanAmount || 0));  // 融資自備款
+          totalOwnFund += (cost - (pos.loanAmount || 0));
           unrealizedPL += (value - cost);
         } else {
           shortValue += value;
           totalDeposit += pos.depositAmount || 0;
-          totalOwnFund += (pos.depositAmount || 0);  // 融券保證金
+          totalOwnFund += (pos.depositAmount || 0);
           unrealizedPL += (cost - value);
         }
       }
     });
 
     const unrealizedPLPct = totalCost > 0 ? (unrealizedPL / totalCost) * 100 : 0;
-    // ⭐ 平均槓桿 = 總市值 / 總自備款
     const avgLeverage = totalOwnFund > 0 ? (totalMarketValue / totalOwnFund) : 0;
 
-    return { 
+    return {
       longValue, shortValue, totalLoan, totalDeposit,
       unrealizedPL, unrealizedPLPct, realizedPL,
       avgLeverage, totalOwnFund, totalMarketValue
     };
   },
 
-
   // ============================================================
-  // 📈 期貨 Tab
-  // ============================================================
-    // ============================================================
-  // 📈 期貨 Tab
+  // 📈 期貨 Tab ✅ 修正：補上槓桿卡 + 契約總值卡
   // ============================================================
   renderFutures() {
     const list = Store.getFutures() || [];
     const stats = this._calcFuturesStats(list);
 
-    // ----- 統計卡片 -----
     const grid = document.getElementById('futuresStatGrid');
     if (grid) {
       grid.innerHTML = `
@@ -608,10 +571,20 @@ const UI = {
             ${stats.realizedPL >= 0 ? '+' : ''}${this._fmt(stats.realizedPL)}
           </div>
         </div>
+        <div class="stat-card">
+          <div class="stat-label">⚖️ 平均槓桿</div>
+          <div class="stat-value ${stats.avgLeverage >= 15 ? 'down' : stats.avgLeverage >= 10 ? '' : 'up'}">
+            ${(stats.avgLeverage || 0).toFixed(1)} x
+          </div>
+          <div class="stat-sub muted">契約值/保證金</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">📊 契約總值</div>
+          <div class="stat-value">${this._fmt(stats.totalContractValue)}</div>
+        </div>
       `;
     }
 
-    // ----- 列表 -----
     const wrap = document.getElementById('futuresList');
     if (!wrap) return;
 
@@ -628,11 +601,10 @@ const UI = {
     let rows = '';
     list.forEach(pos => {
       const symbol = pos.symbol || pos.product || '?';
-      const lots = pos.lots ?? pos.totalContracts ?? 0;
+      const lots = Number(pos.lots ?? pos.totalContracts) || 0;
       const direction = pos.type || pos.direction || 'long';
-      const margin = pos.initialMargin ?? pos.marginUsed ?? 0;
-      
-      // multiplier 優先順序：pos.multiplier → FuturesHelper → 200(預設)
+      const margin = Number(pos.initialMargin ?? pos.marginUsed) || 0;
+
       let multiplier = pos.multiplier;
       if (!multiplier && typeof FuturesHelper !== 'undefined') {
         const c = FuturesHelper.getContract(symbol);
@@ -642,17 +614,15 @@ const UI = {
 
       if (lots <= 0) return;
 
-      const avgPrice = pos.avgPrice || 0;
-      const curPrice = pos.currentPrice || avgPrice;
+      const avgPrice = Number(pos.avgPrice) || 0;
+      const curPrice = Number(pos.currentPrice) || avgPrice;
       const points = direction === 'long'
         ? (curPrice - avgPrice)
         : (avgPrice - curPrice);
       const unrealPL = points * multiplier * lots;
 
-      const pricePct = avgPrice > 0
-        ? (points / avgPrice) * 100
-        : 0;
-      // ⭐ 槓桿比例
+      const pricePct = avgPrice > 0 ? (points / avgPrice) * 100 : 0;
+
       const contractValue = curPrice * multiplier * lots;
       const leverage = margin > 0 ? (contractValue / margin) : 0;
       const leverageClass = leverage >= 15 ? 'down' : leverage >= 10 ? '' : 'up';
@@ -669,10 +639,9 @@ const UI = {
         ? curPrice.toFixed(2)
         : `<span class="muted">${avgPrice.toFixed(2)}</span>`;
 
-      // 結算月顯示 YYYY/MM
       const cm = pos.contractMonth || '';
-      const cmLabel = cm.length === 6 
-        ? `${cm.slice(0,4)}/${cm.slice(4,6)}` 
+      const cmLabel = cm.length === 6
+        ? `${cm.slice(0,4)}/${cm.slice(4,6)}`
         : cm;
 
       rows += `
@@ -689,10 +658,11 @@ const UI = {
             <div class="muted small">${priceTimeStr}</div>
           </td>
           <td class="num">${this._fmt(margin)}</td>
+          <td class="num ${leverageClass}">${(leverage || 0).toFixed(1)}x</td>
           <td class="num ${unrealPL >= 0 ? 'up' : 'down'}">
             ${unrealPL >= 0 ? '+' : ''}${this._fmt(unrealPL)}
             <div class="small ${pricePct >= 0 ? 'up' : 'down'}">
-              ${pricePct >= 0 ? '+' : ''}${pricePct.toFixed(2)}%
+              ${pricePct >= 0 ? '+' : ''}${(pricePct || 0).toFixed(2)}%
             </div>
           </td>
           <td class="num ${(pos.realizedPnl || 0) >= 0 ? 'up' : 'down'}">
@@ -716,7 +686,6 @@ const UI = {
             <tr>
               <th>商品</th><th>方向</th><th>口數</th><th>均價</th><th>現價</th>
               <th>保證金</th><th>槓桿</th><th>未實現損益</th><th>已實現</th><th>操作</th>
-
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -726,13 +695,13 @@ const UI = {
 
   _calcFuturesStats(list) {
     let totalLots = 0, totalMargin = 0, unrealizedPL = 0, realizedPL = 0;
-    let totalContractValue = 0;  // ⭐
+    let totalContractValue = 0;
 
     list.forEach(pos => {
       const symbol = pos.symbol || pos.product || '?';
-      const lots = pos.lots ?? pos.totalContracts ?? 0;
+      const lots = Number(pos.lots ?? pos.totalContracts) || 0;
       const direction = pos.type || pos.direction || 'long';
-      const margin = pos.initialMargin ?? pos.marginUsed ?? 0;
+      const margin = Number(pos.initialMargin ?? pos.marginUsed) || 0;
 
       let multiplier = pos.multiplier;
       if (!multiplier && typeof FuturesHelper !== 'undefined') {
@@ -746,8 +715,7 @@ const UI = {
       realizedPL += pos.realizedPnl || 0;
 
       if (lots > 0 && pos.avgPrice) {
-        // ⭐ 用建倉價算契約總值（保守估）
-        const refPrice = pos.currentPrice || pos.avgPrice;
+        const refPrice = Number(pos.currentPrice) || Number(pos.avgPrice) || 0;
         totalContractValue += refPrice * multiplier * lots;
       }
 
@@ -759,16 +727,16 @@ const UI = {
       }
     });
 
-    // ⭐ 平均槓桿
     const avgLeverage = totalMargin > 0 ? (totalContractValue / totalMargin) : 0;
 
-    return { totalLots, totalMargin, unrealizedPL, realizedPL, 
-             totalContractValue, avgLeverage };
+    return {
+      totalLots, totalMargin, unrealizedPL, realizedPL,
+      totalContractValue, avgLeverage
+    };
   },
 
-
   // ============================================================
-  // 💎📈 暫時的 Modal 占位（D3 才完整實作）
+  // 💎📈 各種 Modal 開啟
   // ============================================================
   openMarginBuyModal() {
     if (typeof TradeModal === 'undefined') {
@@ -777,56 +745,50 @@ const UI = {
     }
     TradeModal.openMarginOpenModal({ defaultType: 'long' });
   },
-openMarginSellModal(id) {
-  if (typeof TradeModal === 'undefined') {
-    this.toast('❌ TradeModal 未載入', 'error');
-    return;
-  }
 
-  // 沒指定 id：顯示部位選擇器
-  if (!id) {
-    const list = Store.getMargin() || [];
-    const active = list.filter(p => {
-      const total = (p.lots || []).reduce((s, l) => s + (l.remaining ?? l.shares ?? 0), 0);
-      return total > 0;
-    });
-
-    if (active.length === 0) {
-      this.toast('⚠️ 目前無可平倉的融資券部位', 'warning');
+  openMarginSellModal(id) {
+    if (typeof TradeModal === 'undefined') {
+      this.toast('❌ TradeModal 未載入', 'error');
       return;
     }
 
-    if (active.length === 1) {
-      // 只有一檔，直接開啟
-      TradeModal.openMarginCloseModal(active[0].id);
+    if (!id) {
+      const list = Store.getMargin() || [];
+      const active = list.filter(p => {
+        const total = (p.lots || []).reduce((s, l) => s + (l.remaining ?? l.shares ?? 0), 0);
+        return total > 0;
+      });
+
+      if (active.length === 0) {
+        this.toast('⚠️ 目前無可平倉的融資券部位', 'warning');
+        return;
+      }
+
+      if (active.length === 1) {
+        TradeModal.openMarginCloseModal(active[0].id);
+        return;
+      }
+
+      let msg = '請輸入要平倉的部位編號：\n\n';
+      active.forEach((p, i) => {
+        const totalShares = (p.lots || []).reduce((s, l) => s + (l.remaining ?? l.shares ?? 0), 0);
+        const typeLabel = p.type === 'long' ? '融資' : '融券';
+        msg += `${i + 1}. ${p.symbol} ${p.name || ''} [${typeLabel}] ${totalShares} 股\n`;
+      });
+      const idx = prompt(msg, '1');
+      if (idx === null) return;
+      const n = parseInt(idx);
+      if (isNaN(n) || n < 1 || n > active.length) {
+        this.toast('❌ 編號無效', 'error');
+        return;
+      }
+      TradeModal.openMarginCloseModal(active[n - 1].id);
       return;
     }
 
-    // 多檔：顯示選擇 prompt
-    let msg = '請輸入要平倉的部位編號：\n\n';
-    active.forEach((p, i) => {
-      const totalShares = (p.lots || []).reduce((s, l) => s + (l.remaining ?? l.shares ?? 0), 0);
-      const typeLabel = p.type === 'long' ? '融資' : '融券';
-      msg += `${i + 1}. ${p.symbol} ${p.name || ''} [${typeLabel}] ${totalShares} 股\n`;
-    });
-    const idx = prompt(msg, '1');
-    if (idx === null) return;
-    const n = parseInt(idx);
-    if (isNaN(n) || n < 1 || n > active.length) {
-      this.toast('❌ 編號無效', 'error');
-      return;
-    }
-    TradeModal.openMarginCloseModal(active[n - 1].id);
-    return;
-  }
+    TradeModal.openMarginCloseModal(id);
+  },
 
-  // 指定 id：直接打開（從表格的 💰 按鈕來）
-  TradeModal.openMarginCloseModal(id);
-},
-
-  // ============================================================
-  // 📈 期貨開倉 Modal
-  // ============================================================
   openFuturesOpenModal() {
     if (typeof TradeModal === 'undefined') {
       this.toast('❌ TradeModal 未載入', 'error');
@@ -835,23 +797,6 @@ openMarginSellModal(id) {
     TradeModal.openFuturesOpenModal({ defaultDirection: 'long' });
   },
 
-  // ============================================================
-  // 📈 期貨平倉 Modal
-  // ============================================================
-    // ============================================================
-  // 📈 期貨開倉 Modal
-  // ============================================================
-  openFuturesOpenModal() {
-    if (typeof TradeModal === 'undefined') {
-      this.toast('❌ TradeModal 未載入', 'error');
-      return;
-    }
-    TradeModal.openFuturesOpenModal({ defaultDirection: 'long' });
-  },
-
-  // ============================================================
-  // 📈 期貨平倉 Modal
-  // ============================================================
   openFuturesCloseModal(id) {
     if (typeof TradeModal === 'undefined') {
       this.toast('❌ TradeModal 未載入', 'error');
@@ -890,25 +835,24 @@ openMarginSellModal(id) {
     }
 
     TradeModal.openFuturesCloseModal({ positionId: id });
-  }, 
+  },
 
   openManualFuturesPriceModal(posId) {
     const pos = Store.getFutures().find(f => f.id === posId);
     if (!pos) return;
     const cur = pos.currentPrice || pos.avgPrice || 0;
-    const newPrice = prompt(`手動輸入 ${pos.name || pos.contract} 的價格：`, cur);
+    const newPrice = prompt(`手動輸入 ${pos.name || pos.symbol} 的價格：`, cur);
     if (newPrice === null) return;
     const price = parseFloat(newPrice);
     if (isNaN(price) || price < 0) {
       this.toast('❌ 價格無效', 'error');
       return;
     }
-    // 直接寫入（暫時，等 D3 加 reducer action）
     pos.currentPrice = price;
     pos.lastPriceUpdate = new Date().toISOString();
     Storage.saveLocal(Store.getPortfolio());
     Store._notify();
-    this.toast(`✅ ${pos.name || pos.product} → ${price}`, 'success');
+    this.toast(`✅ ${pos.name || pos.symbol} → ${price}`, 'success');
   },
 
   // ============================================================
@@ -919,13 +863,13 @@ openMarginSellModal(id) {
     stocks.forEach(s => {
       let stockShares = 0, stockCost = 0;
       (s.lots || []).forEach(l => {
-        const sh = l.remaining ?? l.shares ?? 0;
-        const ec = l.effectiveCost ?? l.price ?? 0;
+        const sh = Number(l.remaining ?? l.shares) || 0;
+        const ec = Number(l.effectiveCost ?? l.price) || 0;
         stockShares += sh;
         stockCost += sh * ec;
       });
       totalCost += stockCost;
-      totalValue += stockShares * (s.currentPrice || 0);
+      totalValue += stockShares * (Number(s.currentPrice) || 0);
       realizedPL += s.realizedPnl || 0;
     });
     const unrealizedPL = totalValue - totalCost;
@@ -951,7 +895,7 @@ openMarginSellModal(id) {
       return;
     }
 
-    const sorted = [...txs].sort((a, b) => 
+    const sorted = [...txs].sort((a, b) =>
       (b.timestamp || '').localeCompare(a.timestamp || '')
     );
     let rows = '';
@@ -1012,26 +956,20 @@ openMarginSellModal(id) {
     const el = document.getElementById('statsContent');
     if (!el) return;
 
-    // 總損益
     const totalUnrealizedPL = stockStats.unrealizedPL + marginStats.unrealizedPL + futuresStats.unrealizedPL;
     const totalRealizedPL = stockStats.realizedPL + marginStats.realizedPL + futuresStats.realizedPL;
     const totalPL = totalUnrealizedPL + totalRealizedPL;
 
-    // ⭐ 全部位加權平均槓桿
-    // 分子：融資券總市值 + 期貨契約總值
-    // 分母：融資自備款 + 融券保證金 + 期貨保證金
     const totalExposure = marginStats.totalMarketValue + futuresStats.totalContractValue;
     const totalCapital = marginStats.totalOwnFund + futuresStats.totalMargin;
     const totalLeverage = totalCapital > 0 ? (totalExposure / totalCapital) : 0;
 
-    // 風險顏色
-    const leverageColorClass = totalLeverage >= 5 ? 'down' 
-                             : totalLeverage >= 3 ? '' 
-                             : totalLeverage >= 1 ? 'up' 
+    const leverageColorClass = totalLeverage >= 5 ? 'down'
+                             : totalLeverage >= 3 ? ''
+                             : totalLeverage >= 1 ? 'up'
                              : '';
 
     el.innerHTML = `
-      <!-- 投資組合總覽 -->
       <div class="section">
         <div class="section-title">📊 投資組合總覽</div>
         <div class="kv-row"><span class="kv-key">現股總市值</span>
@@ -1054,27 +992,26 @@ openMarginSellModal(id) {
             ${totalPL >= 0 ? '+' : ''}${this._fmt(totalPL)}</span></div>
       </div>
 
-      <!-- ⭐ 槓桿風險分析 -->
       <div class="section">
         <div class="section-title">⚖️ 槓桿風險分析</div>
         <div class="kv-row">
           <span class="kv-key">融資券平均槓桿</span>
           <span class="kv-val ${marginStats.avgLeverage >= 2.5 ? 'down' : marginStats.avgLeverage >= 1.8 ? '' : 'up'}">
-            ${marginStats.avgLeverage.toFixed(2)} x
+            ${(marginStats.avgLeverage || 0).toFixed(2)} x
             <span class="muted small">（自備款 ${this._fmt(marginStats.totalOwnFund)}）</span>
           </span>
         </div>
         <div class="kv-row">
           <span class="kv-key">期貨平均槓桿</span>
           <span class="kv-val ${futuresStats.avgLeverage >= 15 ? 'down' : futuresStats.avgLeverage >= 10 ? '' : 'up'}">
-            ${futuresStats.avgLeverage.toFixed(1)} x
+            ${(futuresStats.avgLeverage || 0).toFixed(1)} x
             <span class="muted small">（保證金 ${this._fmt(futuresStats.totalMargin)}）</span>
           </span>
         </div>
         <div class="kv-row" style="border-top:2px solid rgba(255,255,255,0.1); padding-top:8px; margin-top:6px;">
           <span class="kv-key" style="font-weight:700;">🔥 全部位加權平均槓桿</span>
           <span class="kv-val ${leverageColorClass}" style="font-size:20px; font-weight:700;">
-            ${totalLeverage.toFixed(2)} x
+            ${(totalLeverage || 0).toFixed(2)} x
           </span>
         </div>
         <div class="kv-row">
@@ -1091,12 +1028,11 @@ openMarginSellModal(id) {
           </div>
         ` : totalLeverage >= 3 ? `
           <div style="margin-top:10px; padding:10px; background:rgba(251,191,36,0.12); border:1px solid #fbbf24; border-radius:6px; font-size:13px;">
-            ℹ️ <strong style="color:#fbbf24;">中度槓桿</strong>：整體槓桿 ${totalLeverage.toFixed(2)} 倍，請持續關注市場波動。
+            ℹ️ <strong style="color:#fbbf24;">中度槓桿</strong>：整體槓桿 ${(totalLeverage || 0).toFixed(2)} 倍，請持續關注市場波動。
           </div>
         ` : ''}
       </div>
 
-      <!-- 交易統計 -->
       <div class="section">
         <div class="section-title">📈 交易統計</div>
         <div class="kv-row"><span class="kv-key">總交易筆數</span>
@@ -1111,18 +1047,17 @@ openMarginSellModal(id) {
     `;
   },
 
-
   // ============================================================
   // 設定 Tab
   // ============================================================
   renderSettings() {
     const token = Storage.getToken() || '';
     const gistId = Storage.getGistId() || '';
-    const tokenMask = token 
-      ? token.substring(0, 8) + '...' + token.substring(token.length - 4) 
+    const tokenMask = token
+      ? token.substring(0, 8) + '...' + token.substring(token.length - 4)
       : '（未設定）';
     const lastSync = Storage.getLastSync() || '從未';
-    const stockCount = (typeof StockDB !== 'undefined' && StockDB.stocks) 
+    const stockCount = (typeof StockDB !== 'undefined' && StockDB.stocks)
       ? Object.keys(StockDB.stocks).length : 0;
     const ver = CONFIG.VERSION || '?';
 
@@ -1263,9 +1198,6 @@ openMarginSellModal(id) {
     }
     TradeModal.openStockSellModal();
   },
-
-
-
 
   // ============================================================
   // 拍快照

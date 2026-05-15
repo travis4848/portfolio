@@ -528,6 +528,9 @@ const UI = {
   // ============================================================
   // 📈 期貨 Tab
   // ============================================================
+    // ============================================================
+  // 📈 期貨 Tab
+  // ============================================================
   renderFutures() {
     const list = Store.getFutures() || [];
     const stats = this._calcFuturesStats(list);
@@ -539,7 +542,7 @@ const UI = {
         <div class="stat-card">
           <div class="stat-label">總部位數</div>
           <div class="stat-value">${list.length}</div>
-          <div class="stat-sub">總口數 ${stats.totalContracts}</div>
+          <div class="stat-sub">總口數 ${stats.totalLots}</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">已用保證金</div>
@@ -576,52 +579,64 @@ const UI = {
 
     let rows = '';
     list.forEach(pos => {
-      const productCfg = (CONFIG.FUTURES?.PRODUCTS?.[pos.product])
-                      || (CONFIG.FUTURES?.STOCK_FUT_TEMPLATES?.[pos.product])
-                      || {};
-      const pointValue = productCfg.pointValue || productCfg.multiplier 
-                      || productCfg.contractSize || 200;
+      const symbol = pos.symbol || pos.product || '?';
+      const lots = pos.lots ?? pos.totalContracts ?? 0;
+      const direction = pos.type || pos.direction || 'long';
+      const margin = pos.initialMargin ?? pos.marginUsed ?? 0;
+      
+      // multiplier 優先順序：pos.multiplier → FuturesHelper → 200(預設)
+      let multiplier = pos.multiplier;
+      if (!multiplier && typeof FuturesHelper !== 'undefined') {
+        const c = FuturesHelper.getContract(symbol);
+        if (c) multiplier = c.multiplier;
+      }
+      multiplier = multiplier || 200;
 
-      const totalCon = pos.totalContracts || 0;
-      if (totalCon <= 0) return;
+      if (lots <= 0) return;
 
-      const curPrice = pos.currentPrice || pos.avgPrice || 0;
-      const points = pos.direction === 'long'
-        ? (curPrice - pos.avgPrice)
-        : (pos.avgPrice - curPrice);
-      const unrealPL = points * pointValue * totalCon;
+      const avgPrice = pos.avgPrice || 0;
+      const curPrice = pos.currentPrice || avgPrice;
+      const points = direction === 'long'
+        ? (curPrice - avgPrice)
+        : (avgPrice - curPrice);
+      const unrealPL = points * multiplier * lots;
 
-      const pricePct = pos.avgPrice > 0
-        ? ((curPrice - pos.avgPrice) / pos.avgPrice) * 100 * (pos.direction === 'long' ? 1 : -1)
+      const pricePct = avgPrice > 0
+        ? (points / avgPrice) * 100
         : 0;
 
-      const directionLabel = pos.direction === 'long'
-        ? '<span class="up">多單</span>'
-        : '<span class="down">空單</span>';
+      const directionLabel = direction === 'long'
+        ? '<span class="up">📈 多單</span>'
+        : '<span class="down">📉 空單</span>';
 
       const priceTimeStr = pos.lastPriceUpdate
         ? this._timeAgo(pos.lastPriceUpdate)
         : '<span class="muted">未更新</span>';
 
-      // 未更新報價時，提示用戶
       const curPriceCell = pos.currentPrice
-        ? `${curPrice.toFixed(2)}`
-        : `<span class="muted">${pos.avgPrice.toFixed(2)}</span>`;
+        ? curPrice.toFixed(2)
+        : `<span class="muted">${avgPrice.toFixed(2)}</span>`;
+
+      // 結算月顯示 YYYY/MM
+      const cm = pos.contractMonth || '';
+      const cmLabel = cm.length === 6 
+        ? `${cm.slice(0,4)}/${cm.slice(4,6)}` 
+        : cm;
 
       rows += `
         <tr>
           <td class="ticker-cell">
-            <strong>${pos.product}</strong>
-            <span class="ticker-name">${pos.name || pos.contract}</span>
+            <strong>${symbol}</strong>
+            <span class="ticker-name">${pos.name || ''} ${cmLabel ? `<small>(${cmLabel})</small>` : ''}</span>
           </td>
           <td>${directionLabel}</td>
-          <td class="num">${totalCon}</td>
-          <td class="num">${pos.avgPrice.toFixed(2)}</td>
+          <td class="num">${lots}</td>
+          <td class="num">${avgPrice.toFixed(2)}</td>
           <td class="num">
             ${curPriceCell}
             <div class="muted small">${priceTimeStr}</div>
           </td>
-          <td class="num">${this._fmt(pos.marginUsed || 0)}</td>
+          <td class="num">${this._fmt(margin)}</td>
           <td class="num ${unrealPL >= 0 ? 'up' : 'down'}">
             ${unrealPL >= 0 ? '+' : ''}${this._fmt(unrealPL)}
             <div class="small ${pricePct >= 0 ? 'up' : 'down'}">
@@ -655,6 +670,38 @@ const UI = {
         </table>
       </div>`;
   },
+
+  _calcFuturesStats(list) {
+    let totalLots = 0, totalMargin = 0, unrealizedPL = 0, realizedPL = 0;
+
+    list.forEach(pos => {
+      const symbol = pos.symbol || pos.product || '?';
+      const lots = pos.lots ?? pos.totalContracts ?? 0;
+      const direction = pos.type || pos.direction || 'long';
+      const margin = pos.initialMargin ?? pos.marginUsed ?? 0;
+
+      let multiplier = pos.multiplier;
+      if (!multiplier && typeof FuturesHelper !== 'undefined') {
+        const c = FuturesHelper.getContract(symbol);
+        if (c) multiplier = c.multiplier;
+      }
+      multiplier = multiplier || 200;
+
+      totalLots += lots;
+      totalMargin += margin;
+      realizedPL += pos.realizedPnl || 0;
+
+      if (pos.currentPrice && pos.avgPrice && lots > 0) {
+        const points = direction === 'long'
+          ? (pos.currentPrice - pos.avgPrice)
+          : (pos.avgPrice - pos.currentPrice);
+        unrealizedPL += points * multiplier * lots;
+      }
+    });
+
+    return { totalLots, totalMargin, unrealizedPL, realizedPL };
+  },
+
 
   _calcFuturesStats(list) {
     let totalContracts = 0, totalMargin = 0, unrealizedPL = 0, realizedPL = 0;
@@ -753,23 +800,34 @@ openMarginSellModal(id) {
   // ============================================================
   // 📈 期貨平倉 Modal
   // ============================================================
+    // ============================================================
+  // 📈 期貨開倉 Modal
+  // ============================================================
+  openFuturesOpenModal() {
+    if (typeof TradeModal === 'undefined') {
+      this.toast('❌ TradeModal 未載入', 'error');
+      return;
+    }
+    TradeModal.openFuturesOpenModal({ defaultDirection: 'long' });
+  },
+
+  // ============================================================
+  // 📈 期貨平倉 Modal
+  // ============================================================
   openFuturesCloseModal(id) {
     if (typeof TradeModal === 'undefined') {
       this.toast('❌ TradeModal 未載入', 'error');
       return;
     }
 
-    // 沒指定 id：顯示部位選擇器
     if (!id) {
       const list = Store.getFutures() || [];
-      // 兼容兩種欄位命名
-      const active = list.filter(p => (p.lots || p.totalContracts || 0) > 0);
+      const active = list.filter(p => (p.lots ?? p.totalContracts ?? 0) > 0);
 
       if (active.length === 0) {
         this.toast('⚠️ 目前無可平倉的期貨部位', 'warning');
         return;
       }
-
       if (active.length === 1) {
         TradeModal.openFuturesCloseModal({ positionId: active[0].id });
         return;
@@ -778,10 +836,9 @@ openMarginSellModal(id) {
       let msg = '請輸入要平倉的部位編號：\n\n';
       active.forEach((p, i) => {
         const sym = p.symbol || p.product || '?';
-        const name = p.name || '';
-        const lots = p.lots || p.totalContracts || 0;
+        const lots = p.lots ?? p.totalContracts ?? 0;
         const dir = (p.type || p.direction) === 'long' ? '多單' : '空單';
-        msg += `${i + 1}. ${sym} ${name} [${dir}] ${lots} 口\n`;
+        msg += `${i + 1}. ${sym} ${p.name || ''} [${dir}] ${lots} 口\n`;
       });
       const idx = prompt(msg, '1');
       if (idx === null) return;
@@ -794,9 +851,8 @@ openMarginSellModal(id) {
       return;
     }
 
-    // 指定 id：從表格 💰 按鈕來
     TradeModal.openFuturesCloseModal({ positionId: id });
-  },
+  }, 
 
   openManualFuturesPriceModal(posId) {
     const pos = Store.getFutures().find(f => f.id === posId);

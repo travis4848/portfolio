@@ -162,6 +162,17 @@ const UI = {
             ${stats.realizedPL >= 0 ? '+' : ''}${this._fmt(stats.realizedPL)}
           </div>
         </div>
+        <div class="stat-card">
+          <div class="stat-label">⚖️ 平均槓桿</div>
+          <div class="stat-value ${stats.avgLeverage >= 15 ? 'down' : stats.avgLeverage >= 10 ? '' : 'up'}">
+            ${stats.avgLeverage.toFixed(1)} x
+          </div>
+          <div class="stat-sub muted">契約值/保證金</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">📊 契約總值</div>
+          <div class="stat-value">${this._fmt(stats.totalContractValue)}</div>
+        </div>
       `;
     }
 
@@ -384,8 +395,21 @@ const UI = {
             ${stats.realizedPL >= 0 ? '+' : ''}${this._fmt(stats.realizedPL)}
           </div>
         </div>
+        <div class="stat-card">
+          <div class="stat-label">⚖️ 平均槓桿</div>
+          <div class="stat-value ${stats.avgLeverage >= 2.5 ? 'down' : stats.avgLeverage >= 1.8 ? '' : 'up'}">
+            ${stats.avgLeverage.toFixed(2)} x
+          </div>
+          <div class="stat-sub muted">市值/自備款</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">💵 總自備款</div>
+          <div class="stat-value">${this._fmt(stats.totalOwnFund)}</div>
+          <div class="stat-sub muted">總市值 ${this._fmt(stats.totalMarketValue)}</div>
+        </div>
       `;
     }
+
 
     // ----- 列表 -----
     const wrap = document.getElementById('marginList');
@@ -437,6 +461,15 @@ const UI = {
         maintainPct = ((pos.depositAmount || 0) + value) / value * 100;
       }
       const maintainClass = maintainPct >= 130 ? 'up' : 'down';
+      // ⭐ 槓桿比例
+      let leverage = 0;
+      if (pos.type === 'long') {
+        const ownFundCost = totalCost - (pos.loanAmount || 0);
+        leverage = ownFundCost > 0 ? (value / ownFundCost) : 0;
+      } else {
+        leverage = (pos.depositAmount || 0) > 0 ? (value / pos.depositAmount) : 0;
+      }
+      const leverageClass = leverage >= 2.5 ? 'down' : leverage >= 1.8 ? '' : 'up';
 
       const typeLabel = pos.type === 'long'
         ? '<span class="up">融資</span>'
@@ -461,6 +494,7 @@ const UI = {
           </td>
           <td class="num">${this._fmt(value)}</td>
           <td class="num">${this._fmt(ownFund)}</td>
+          <td class="num ${leverageClass}">${leverage.toFixed(2)}x</td>
           <td class="num ${maintainClass}">${maintainPct.toFixed(0)}%</td>
           <td class="num ${pl >= 0 ? 'up' : 'down'}">
             ${pl >= 0 ? '+' : ''}${this._fmt(pl)}
@@ -485,7 +519,7 @@ const UI = {
           <thead>
             <tr>
               <th>股票</th><th>類型</th><th>股數</th><th>均價</th><th>現價</th>
-              <th>市值</th><th>自備款/保證金</th><th>維持率</th><th>損益</th><th>操作</th>
+              <th>市值</th><th>自備款/保證金</th><th>槓桿</th><th>維持率</th><th>損益</th><th>操作</th>
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -496,6 +530,8 @@ const UI = {
   _calcMarginStats(list) {
     let longValue = 0, shortValue = 0, totalLoan = 0, totalDeposit = 0;
     let unrealizedPL = 0, totalCost = 0, realizedPL = 0;
+    let totalOwnFund = 0;  // ⭐ 總自備款（含融券保證金）
+    let totalMarketValue = 0;  // ⭐ 總市值（給槓桿算）
 
     list.forEach(pos => {
       let shares = 0, cost = 0;
@@ -509,21 +545,33 @@ const UI = {
       totalCost += cost;
       realizedPL += pos.realizedPnl || 0;
 
-      if (pos.type === 'long') {
-        longValue += value;
-        totalLoan += pos.loanAmount || 0;
-        unrealizedPL += (value - cost);
-      } else {
-        shortValue += value;
-        totalDeposit += pos.depositAmount || 0;
-        unrealizedPL += (cost - value);
+      if (shares > 0) {
+        totalMarketValue += value;
+        if (pos.type === 'long') {
+          longValue += value;
+          totalLoan += pos.loanAmount || 0;
+          totalOwnFund += (cost - (pos.loanAmount || 0));  // 融資自備款
+          unrealizedPL += (value - cost);
+        } else {
+          shortValue += value;
+          totalDeposit += pos.depositAmount || 0;
+          totalOwnFund += (pos.depositAmount || 0);  // 融券保證金
+          unrealizedPL += (cost - value);
+        }
       }
     });
 
     const unrealizedPLPct = totalCost > 0 ? (unrealizedPL / totalCost) * 100 : 0;
-    return { longValue, shortValue, totalLoan, totalDeposit,
-             unrealizedPL, unrealizedPLPct, realizedPL };
+    // ⭐ 平均槓桿 = 總市值 / 總自備款
+    const avgLeverage = totalOwnFund > 0 ? (totalMarketValue / totalOwnFund) : 0;
+
+    return { 
+      longValue, shortValue, totalLoan, totalDeposit,
+      unrealizedPL, unrealizedPLPct, realizedPL,
+      avgLeverage, totalOwnFund, totalMarketValue
+    };
   },
+
 
   // ============================================================
   // 📈 期貨 Tab
@@ -604,6 +652,10 @@ const UI = {
       const pricePct = avgPrice > 0
         ? (points / avgPrice) * 100
         : 0;
+      // ⭐ 槓桿比例
+      const contractValue = curPrice * multiplier * lots;
+      const leverage = margin > 0 ? (contractValue / margin) : 0;
+      const leverageClass = leverage >= 15 ? 'down' : leverage >= 10 ? '' : 'up';
 
       const directionLabel = direction === 'long'
         ? '<span class="up">📈 多單</span>'
@@ -663,7 +715,8 @@ const UI = {
           <thead>
             <tr>
               <th>商品</th><th>方向</th><th>口數</th><th>均價</th><th>現價</th>
-              <th>保證金</th><th>未實現損益</th><th>已實現</th><th>操作</th>
+              <th>保證金</th><th>槓桿</th><th>未實現損益</th><th>已實現</th><th>操作</th>
+
             </tr>
           </thead>
           <tbody>${rows}</tbody>
@@ -673,6 +726,7 @@ const UI = {
 
   _calcFuturesStats(list) {
     let totalLots = 0, totalMargin = 0, unrealizedPL = 0, realizedPL = 0;
+    let totalContractValue = 0;  // ⭐
 
     list.forEach(pos => {
       const symbol = pos.symbol || pos.product || '?';
@@ -691,6 +745,12 @@ const UI = {
       totalMargin += margin;
       realizedPL += pos.realizedPnl || 0;
 
+      if (lots > 0 && pos.avgPrice) {
+        // ⭐ 用建倉價算契約總值（保守估）
+        const refPrice = pos.currentPrice || pos.avgPrice;
+        totalContractValue += refPrice * multiplier * lots;
+      }
+
       if (pos.currentPrice && pos.avgPrice && lots > 0) {
         const points = direction === 'long'
           ? (pos.currentPrice - pos.avgPrice)
@@ -699,35 +759,13 @@ const UI = {
       }
     });
 
-    return { totalLots, totalMargin, unrealizedPL, realizedPL };
+    // ⭐ 平均槓桿
+    const avgLeverage = totalMargin > 0 ? (totalContractValue / totalMargin) : 0;
+
+    return { totalLots, totalMargin, unrealizedPL, realizedPL, 
+             totalContractValue, avgLeverage };
   },
 
-
-  _calcFuturesStats(list) {
-    let totalContracts = 0, totalMargin = 0, unrealizedPL = 0, realizedPL = 0;
-
-    list.forEach(pos => {
-      const productCfg = (CONFIG.FUTURES?.PRODUCTS?.[pos.product])
-                      || (CONFIG.FUTURES?.STOCK_FUT_TEMPLATES?.[pos.product])
-                      || {};
-      const pointValue = productCfg.pointValue || productCfg.multiplier 
-                      || productCfg.contractSize || 200;
-
-      const con = pos.totalContracts || 0;
-      totalContracts += con;
-      totalMargin += pos.marginUsed || 0;
-      realizedPL += pos.realizedPnl || 0;
-
-      if (pos.currentPrice && pos.avgPrice && con > 0) {
-        const points = pos.direction === 'long'
-          ? (pos.currentPrice - pos.avgPrice)
-          : (pos.avgPrice - pos.currentPrice);
-        unrealizedPL += points * pointValue * con;
-      }
-    });
-
-    return { totalContracts, totalMargin, unrealizedPL, realizedPL };
-  },
 
   // ============================================================
   // 💎📈 暫時的 Modal 占位（D3 才完整實作）
@@ -961,32 +999,104 @@ openMarginSellModal(id) {
     const portfolio = Store.getPortfolio();
     const history = Store.getHistory();
     const stocks = Store.getStocks();
-    const stats = this._calcStockStats(stocks);
+    const margin = Store.getMargin() || [];
+    const futures = Store.getFutures() || [];
+
+    const stockStats = this._calcStockStats(stocks);
+    const marginStats = this._calcMarginStats(margin);
+    const futuresStats = this._calcFuturesStats(futures);
+
     const txs = history?.transactions || [];
     const snapshots = history?.snapshots || [];
 
     const el = document.getElementById('statsContent');
     if (!el) return;
 
-    const totalPL = stats.unrealizedPL + stats.realizedPL;
+    // 總損益
+    const totalUnrealizedPL = stockStats.unrealizedPL + marginStats.unrealizedPL + futuresStats.unrealizedPL;
+    const totalRealizedPL = stockStats.realizedPL + marginStats.realizedPL + futuresStats.realizedPL;
+    const totalPL = totalUnrealizedPL + totalRealizedPL;
+
+    // ⭐ 全部位加權平均槓桿
+    // 分子：融資券總市值 + 期貨契約總值
+    // 分母：融資自備款 + 融券保證金 + 期貨保證金
+    const totalExposure = marginStats.totalMarketValue + futuresStats.totalContractValue;
+    const totalCapital = marginStats.totalOwnFund + futuresStats.totalMargin;
+    const totalLeverage = totalCapital > 0 ? (totalExposure / totalCapital) : 0;
+
+    // 風險顏色
+    const leverageColorClass = totalLeverage >= 5 ? 'down' 
+                             : totalLeverage >= 3 ? '' 
+                             : totalLeverage >= 1 ? 'up' 
+                             : '';
 
     el.innerHTML = `
+      <!-- 投資組合總覽 -->
       <div class="section">
         <div class="section-title">📊 投資組合總覽</div>
-        <div class="kv-row"><span class="kv-key">總市值</span>
-          <span class="kv-val">${this._fmt(stats.totalValue)}</span></div>
+        <div class="kv-row"><span class="kv-key">現股總市值</span>
+          <span class="kv-val">${this._fmt(stockStats.totalValue)}</span></div>
+        <div class="kv-row"><span class="kv-key">融資券總市值</span>
+          <span class="kv-val">${this._fmt(marginStats.totalMarketValue)}</span></div>
+        <div class="kv-row"><span class="kv-key">期貨契約總值</span>
+          <span class="kv-val">${this._fmt(futuresStats.totalContractValue)}</span></div>
         <div class="kv-row"><span class="kv-key">總成本</span>
-          <span class="kv-val">${this._fmt(stats.totalCost)}</span></div>
-        <div class="kv-row"><span class="kv-key">未實現損益</span>
-          <span class="kv-val ${stats.unrealizedPL >= 0 ? 'up' : 'down'}">
-            ${this._fmt(stats.unrealizedPL)}</span></div>
-        <div class="kv-row"><span class="kv-key">已實現損益</span>
-          <span class="kv-val ${stats.realizedPL >= 0 ? 'up' : 'down'}">
-            ${this._fmt(stats.realizedPL)}</span></div>
-        <div class="kv-row"><span class="kv-key">總損益</span>
-          <span class="kv-val ${totalPL >= 0 ? 'up' : 'down'}">
-            ${this._fmt(totalPL)}</span></div>
+          <span class="kv-val">${this._fmt(stockStats.totalCost)}</span></div>
+        <div class="kv-row"><span class="kv-key">總未實現損益</span>
+          <span class="kv-val ${totalUnrealizedPL >= 0 ? 'up' : 'down'}">
+            ${totalUnrealizedPL >= 0 ? '+' : ''}${this._fmt(totalUnrealizedPL)}</span></div>
+        <div class="kv-row"><span class="kv-key">總已實現損益</span>
+          <span class="kv-val ${totalRealizedPL >= 0 ? 'up' : 'down'}">
+            ${totalRealizedPL >= 0 ? '+' : ''}${this._fmt(totalRealizedPL)}</span></div>
+        <div class="kv-row" style="border-top:2px solid rgba(255,255,255,0.1); padding-top:8px; margin-top:6px;">
+          <span class="kv-key" style="font-weight:700;">🎯 總損益</span>
+          <span class="kv-val ${totalPL >= 0 ? 'up' : 'down'}" style="font-size:18px; font-weight:700;">
+            ${totalPL >= 0 ? '+' : ''}${this._fmt(totalPL)}</span></div>
       </div>
+
+      <!-- ⭐ 槓桿風險分析 -->
+      <div class="section">
+        <div class="section-title">⚖️ 槓桿風險分析</div>
+        <div class="kv-row">
+          <span class="kv-key">融資券平均槓桿</span>
+          <span class="kv-val ${marginStats.avgLeverage >= 2.5 ? 'down' : marginStats.avgLeverage >= 1.8 ? '' : 'up'}">
+            ${marginStats.avgLeverage.toFixed(2)} x
+            <span class="muted small">（自備款 ${this._fmt(marginStats.totalOwnFund)}）</span>
+          </span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key">期貨平均槓桿</span>
+          <span class="kv-val ${futuresStats.avgLeverage >= 15 ? 'down' : futuresStats.avgLeverage >= 10 ? '' : 'up'}">
+            ${futuresStats.avgLeverage.toFixed(1)} x
+            <span class="muted small">（保證金 ${this._fmt(futuresStats.totalMargin)}）</span>
+          </span>
+        </div>
+        <div class="kv-row" style="border-top:2px solid rgba(255,255,255,0.1); padding-top:8px; margin-top:6px;">
+          <span class="kv-key" style="font-weight:700;">🔥 全部位加權平均槓桿</span>
+          <span class="kv-val ${leverageColorClass}" style="font-size:20px; font-weight:700;">
+            ${totalLeverage.toFixed(2)} x
+          </span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key muted small">總曝險（市值+契約值）</span>
+          <span class="kv-val muted small">${this._fmt(totalExposure)}</span>
+        </div>
+        <div class="kv-row">
+          <span class="kv-key muted small">總投入資本（自備+保證金）</span>
+          <span class="kv-val muted small">${this._fmt(totalCapital)}</span>
+        </div>
+        ${totalLeverage >= 5 ? `
+          <div style="margin-top:10px; padding:10px; background:rgba(239,68,68,0.15); border:1px solid #ef4444; border-radius:6px; font-size:13px;">
+            ⚠️ <strong class="down">高槓桿警示！</strong>整體槓桿超過 5 倍，請注意保證金維持率與部位風險。
+          </div>
+        ` : totalLeverage >= 3 ? `
+          <div style="margin-top:10px; padding:10px; background:rgba(251,191,36,0.12); border:1px solid #fbbf24; border-radius:6px; font-size:13px;">
+            ℹ️ <strong style="color:#fbbf24;">中度槓桿</strong>：整體槓桿 ${totalLeverage.toFixed(2)} 倍，請持續關注市場波動。
+          </div>
+        ` : ''}
+      </div>
+
+      <!-- 交易統計 -->
       <div class="section">
         <div class="section-title">📈 交易統計</div>
         <div class="kv-row"><span class="kv-key">總交易筆數</span>
@@ -1000,6 +1110,7 @@ openMarginSellModal(id) {
       </div>
     `;
   },
+
 
   // ============================================================
   // 設定 Tab

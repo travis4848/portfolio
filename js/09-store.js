@@ -425,7 +425,7 @@ const Store = {
       // ============================================================
       // 📈 期貨
       // ============================================================
-            case 'FUTURES_OPEN': {
+      case 'FUTURES_OPEN': {
         // payload: { symbol, name, contractMonth, type, lots, price, multiplier,
         //           initialMargin, maintenanceMargin, fee, stopLoss, takeProfit, date, note }
         if (!this.state.portfolio.futures) this.state.portfolio.futures = [];
@@ -446,7 +446,7 @@ const Store = {
           symbol: payload.symbol,
           name: payload.name,
           contractMonth: payload.contractMonth,
-          type: payload.type,                    // 'long' | 'short'
+          type: payload.type,
           lots: payload.lots,
           avgPrice: payload.price,
           currentPrice: payload.price,
